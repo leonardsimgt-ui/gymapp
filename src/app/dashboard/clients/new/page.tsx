@@ -12,7 +12,7 @@ export default function NewClientPage() {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
   const [form, setForm] = useState({
-    full_name: '', phone: '', email: '', date_of_birth: '',
+    full_name: '', phone: '', date_of_birth: '',
     gender: '', health_notes: '', gym_id: '',
   })
   const router = useRouter()
@@ -36,10 +36,11 @@ export default function NewClientPage() {
     if (!user) return
 
     const { error: err } = await supabase.from('clients').insert({
-      ...form,
+      full_name: form.full_name,
+      phone: form.phone,
+      gym_id: form.gym_id,
       trainer_id: user.id,
       date_of_birth: form.date_of_birth || null,
-      email: form.email || null,
       gender: form.gender || null,
       health_notes: form.health_notes || null,
     })
@@ -52,8 +53,9 @@ export default function NewClientPage() {
     }
   }
 
-  const set = (field: string) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) =>
-    setForm(f => ({ ...f, [field]: e.target.value }))
+  const set = (field: string) => (
+    e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>
+  ) => setForm(f => ({ ...f, [field]: e.target.value }))
 
   return (
     <div className="max-w-lg mx-auto space-y-4">
@@ -76,23 +78,29 @@ export default function NewClientPage() {
 
         <div>
           <label className="label">Full Name *</label>
-          <input className="input" required value={form.full_name} onChange={set('full_name')} placeholder="e.g. Sarah Tan" />
+          <input
+            className="input" required
+            value={form.full_name} onChange={set('full_name')}
+            placeholder="e.g. Sarah Tan"
+          />
         </div>
 
         <div>
           <label className="label">Phone Number *</label>
-          <input className="input" required value={form.phone} onChange={set('phone')} placeholder="+65 9123 4567" type="tel" />
-        </div>
-
-        <div>
-          <label className="label">Email</label>
-          <input className="input" value={form.email} onChange={set('email')} placeholder="sarah@email.com" type="email" />
+          <input
+            className="input" required type="tel"
+            value={form.phone} onChange={set('phone')}
+            placeholder="+65 9123 4567"
+          />
         </div>
 
         <div className="grid grid-cols-2 gap-3">
           <div>
             <label className="label">Date of Birth</label>
-            <input className="input" type="date" value={form.date_of_birth} onChange={set('date_of_birth')} />
+            <input
+              className="input" type="date"
+              value={form.date_of_birth} onChange={set('date_of_birth')}
+            />
           </div>
           <div>
             <label className="label">Gender</label>
@@ -118,8 +126,7 @@ export default function NewClientPage() {
           <label className="label">Health Notes / Medical Conditions</label>
           <textarea
             className="input min-h-[80px] resize-none"
-            value={form.health_notes}
-            onChange={set('health_notes')}
+            value={form.health_notes} onChange={set('health_notes')}
             placeholder="Any injuries, medical conditions, or notes to be aware of..."
           />
         </div>
