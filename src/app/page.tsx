@@ -1,17 +1,26 @@
 'use client'
 
+import { useEffect, useState } from 'react'
 import { createClient } from '@/lib/supabase-browser'
 import { Dumbbell, Building2 } from 'lucide-react'
 
 export default function LoginPage() {
+  const [loginLogo, setLoginLogo] = useState<string | null>(null)
   const supabase = createClient()
+
+  useEffect(() => {
+    const loadLogo = async () => {
+      const { data } = await supabase
+        .from('app_settings').select('login_logo_url').eq('id', 'global').single()
+      if (data?.login_logo_url) setLoginLogo(data.login_logo_url)
+    }
+    loadLogo()
+  }, [])
 
   const handleGoogleLogin = async () => {
     await supabase.auth.signInWithOAuth({
       provider: 'google',
-      options: {
-        redirectTo: `${window.location.origin}/auth/callback`,
-      },
+      options: { redirectTo: `${window.location.origin}/auth/callback` },
     })
   }
 
@@ -21,15 +30,18 @@ export default function LoginPage() {
 
         {/* Logo */}
         <div className="flex justify-center mb-4">
-          <div className="bg-green-600 p-3 rounded-2xl">
-            <Dumbbell className="w-8 h-8 text-white" />
-          </div>
+          {loginLogo ? (
+            <img src={loginLogo} alt="Logo" className="h-16 w-auto object-contain" />
+          ) : (
+            <div className="bg-green-600 p-3 rounded-2xl">
+              <Dumbbell className="w-8 h-8 text-white" />
+            </div>
+          )}
         </div>
 
         <h1 className="text-2xl font-bold text-gray-900 mb-1">GymApp</h1>
         <p className="text-gray-500 text-sm mb-8">Trainer Management Platform</p>
 
-        {/* Google login */}
         <button
           onClick={handleGoogleLogin}
           className="w-full flex items-center justify-center gap-3 border border-gray-200 rounded-lg px-4 py-3 text-sm font-medium text-gray-700 hover:bg-gray-50 transition-colors"
@@ -48,7 +60,6 @@ export default function LoginPage() {
           Contact your admin if you need an account.
         </p>
 
-        {/* Gym Library branding */}
         <div className="mt-8 pt-6 border-t border-gray-100 flex items-center justify-center gap-1.5">
           <Building2 className="w-3.5 h-3.5 text-gray-300" />
           <p className="text-xs text-gray-300 font-medium tracking-wide">Gym Library</p>
