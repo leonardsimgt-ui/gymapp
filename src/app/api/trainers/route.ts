@@ -3,11 +3,16 @@ import { NextResponse } from 'next/server'
 
 export async function POST(request: Request) {
   try {
-    const serverClient = createSupabaseServerClient()
+    const serverClient = await createSupabaseServerClient()
     const { data: { user } } = await serverClient.auth.getUser()
     if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
-    const { data: currentUser } = await serverClient.from('users').select('role').eq('id', user.id).single()
+    const { data: currentUser } = await serverClient
+      .from('users')
+      .select('role')
+      .eq('id', user.id)
+      .single()
+
     if (!currentUser || !['admin', 'manager'].includes(currentUser.role)) {
       return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
     }
@@ -17,7 +22,6 @@ export async function POST(request: Request) {
 
     const adminClient = createAdminClient()
 
-    // Create auth user with email (they will sign in via Google)
     const { data: authData, error: authError } = await adminClient.auth.admin.createUser({
       email,
       email_confirm: true,
@@ -26,7 +30,6 @@ export async function POST(request: Request) {
 
     if (authError) return NextResponse.json({ error: authError.message }, { status: 400 })
 
-    // Insert into users table
     const { error: userError } = await adminClient.from('users').insert({
       id: authData.user.id,
       full_name,
@@ -39,7 +42,6 @@ export async function POST(request: Request) {
 
     if (userError) return NextResponse.json({ error: userError.message }, { status: 400 })
 
-    // Assign gyms
     if (gym_ids && gym_ids.length > 0) {
       const gymAssignments = gym_ids.map((gymId: string, idx: number) => ({
         trainer_id: authData.user.id,
