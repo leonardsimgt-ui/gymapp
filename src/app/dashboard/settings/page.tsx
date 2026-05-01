@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react'
 import { createClient } from '@/lib/supabase-browser'
 import { Gym, User } from '@/types'
-import { Upload, Save, Building2, CheckCircle, Plus, Trash2, Edit2 } from 'lucide-react'
+import { Upload, Save, Building2, CheckCircle, Plus, ImageIcon } from 'lucide-react'
 
 interface GymWithManager extends Gym {
   manager?: User
@@ -13,122 +13,113 @@ export default function SettingsPage() {
   const [gyms, setGyms] = useState<GymWithManager[]>([])
   const [managers, setManagers] = useState<User[]>([])
   const [selectedGym, setSelectedGym] = useState<GymWithManager | null>(null)
-  const [form, setForm] = useState({
-    name: '', address: '', phone: '', manager_id: '',
-  })
-  const [logoFile, setLogoFile] = useState<File | null>(null)
-  const [logoPreview, setLogoPreview] = useState<string | null>(null)
-  const [uploading, setUploading] = useState(false)
-  const [saving, setSaving] = useState(false)
-  const [saved, setSaved] = useState(false)
+  const [gymForm, setGymForm] = useState({ name: '', address: '', phone: '', manager_id: '' })
+  const [gymLogoFile, setGymLogoFile] = useState<File | null>(null)
+  const [gymLogoPreview, setGymLogoPreview] = useState<string | null>(null)
+
+  // Global app logos
+  const [loginLogoFile, setLoginLogoFile] = useState<File | null>(null)
+  const [loginLogoPreview, setLoginLogoPreview] = useState<string | null>(null)
+  const [sidebarLogoFile, setSidebarLogoFile] = useState<File | null>(null)
+  const [sidebarLogoPreview, setSidebarLogoPreview] = useState<string | null>(null)
+
+  const [saving, setSaving] = useState<string | null>(null)
+  const [saved, setSaved] = useState<string | null>(null)
   const [showAddForm, setShowAddForm] = useState(false)
   const [newGymName, setNewGymName] = useState('')
-  const [commissionForm, setCommissionForm] = useState({
-    signup_pct: '10', session_pct: '15',
-  })
+  const [commissionForm, setCommissionForm] = useState({ signup_pct: '10', session_pct: '15' })
   const supabase = createClient()
 
   useEffect(() => { loadData() }, [])
 
   const loadData = async () => {
-    // Load gyms with their assigned manager
-    const { data: gymData } = await supabase
-      .from('gyms')
-      .select('*')
-      .order('name')
-    
-    // Load all manager accounts
-    const { data: managerData } = await supabase
-      .from('users')
-      .select('*')
-      .eq('role', 'manager')
-      .eq('is_active', true)
-      .order('full_name')
-    
+    const { data: gymData } = await supabase.from('gyms').select('*').order('name')
+    const { data: managerData } = await supabase.from('users').select('*')
+      .eq('role', 'manager').eq('is_active', true).order('full_name')
+    const { data: settings } = await supabase.from('app_settings').select('*').eq('id', 'global').single()
+
     setManagers(managerData || [])
-
-    // Enrich gyms with their manager info
-    const enriched = (gymData || []).map(gym => {
-      const mgr = managerData?.find(m => m.manager_gym_id === gym.id)
-      return { ...gym, manager: mgr }
-    })
+    const enriched = (gymData || []).map(gym => ({
+      ...gym,
+      manager: managerData?.find(m => m.manager_gym_id === gym.id),
+    }))
     setGyms(enriched)
+    if (enriched.length > 0 && !selectedGym) selectGym(enriched[0])
 
-    if (enriched.length > 0 && !selectedGym) {
-      selectGym(enriched[0])
+    if (settings) {
+      setLoginLogoPreview(settings.login_logo_url || null)
+      setSidebarLogoPreview(settings.admin_sidebar_logo_url || null)
     }
   }
 
   const selectGym = (gym: GymWithManager) => {
     setSelectedGym(gym)
-    setForm({
+    setGymForm({
       name: gym.name,
       address: gym.address || '',
       phone: gym.phone || '',
       manager_id: gym.manager?.id || '',
     })
-    setLogoPreview(gym.logo_url || null)
-    setLogoFile(null)
-    setSaved(false)
+    setGymLogoPreview(gym.logo_url || null)
+    setGymLogoFile(null)
+    setSaved(null)
   }
 
-  const handleLogoChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0]
-    if (!file) return
-    setLogoFile(file)
-    setLogoPreview(URL.createObjectURL(file))
+  const uploadLogo = async (file: File, bucket: string, path: string): Promise<string | null> => {
+    const { error } = await supabase.storage.from(bucket).upload(path, file, { upsert: true })
+    if (error) return null
+    const { data } = supabase.storage.from(bucket).getPublicUrl(path)
+    return data.publicUrl + '?t=' + Date.now()
   }
 
-  const handleSave = async () => {
-    if (!selectedGym) return
-    setSaving(true)
-    setSaved(false)
+  const handleSaveGlobalLogos = async () => {
+    setSaving('logos')
+    const updates: any = { updated_at: new Date().toISOString() }
 
-    let logo_url = selectedGym.logo_url
-
-    // Upload logo if changed
-    if (logoFile) {
-      setUploading(true)
-      const ext = logoFile.name.split('.').pop()
-      const path = `${selectedGym.id}/logo.${ext}`
-      const { error: uploadError } = await supabase.storage
-        .from('gym-logos')
-        .upload(path, logoFile, { upsert: true })
-      if (!uploadError) {
-        const { data: urlData } = supabase.storage
-          .from('gym-logos').getPublicUrl(path)
-        logo_url = urlData.publicUrl
-      }
-      setUploading(false)
+    if (loginLogoFile) {
+      const url = await uploadLogo(loginLogoFile, 'app-logos', 'login-logo')
+      if (url) { updates.login_logo_url = url; setLoginLogoPreview(url) }
+    }
+    if (sidebarLogoFile) {
+      const url = await uploadLogo(sidebarLogoFile, 'app-logos', 'admin-sidebar-logo')
+      if (url) { updates.admin_sidebar_logo_url = url; setSidebarLogoPreview(url) }
     }
 
-    // Update gym details
+    await supabase.from('app_settings').upsert({ id: 'global', ...updates })
+    setSaving(null)
+    setSaved('logos')
+    setTimeout(() => setSaved(null), 3000)
+  }
+
+  const handleSaveGym = async () => {
+    if (!selectedGym) return
+    setSaving('gym')
+
+    let logo_url = selectedGym.logo_url
+    if (gymLogoFile) {
+      const url = await uploadLogo(gymLogoFile, 'gym-logos', `${selectedGym.id}/logo`)
+      if (url) logo_url = url
+    }
+
     await supabase.from('gyms').update({
-      name: form.name,
-      address: form.address || null,
-      phone: form.phone || null,
+      name: gymForm.name,
+      address: gymForm.address || null,
+      phone: gymForm.phone || null,
       logo_url,
     }).eq('id', selectedGym.id)
 
-    // Update manager assignment:
-    // 1. Remove current manager's gym assignment if changing
-    if (selectedGym.manager && selectedGym.manager.id !== form.manager_id) {
-      await supabase.from('users')
-        .update({ manager_gym_id: null })
-        .eq('id', selectedGym.manager.id)
+    // Update manager assignment
+    if (selectedGym.manager && selectedGym.manager.id !== gymForm.manager_id) {
+      await supabase.from('users').update({ manager_gym_id: null }).eq('id', selectedGym.manager.id)
     }
-
-    // 2. Assign new manager to this gym
-    if (form.manager_id) {
-      await supabase.from('users')
-        .update({ manager_gym_id: selectedGym.id })
-        .eq('id', form.manager_id)
+    if (gymForm.manager_id) {
+      await supabase.from('users').update({ manager_gym_id: selectedGym.id }).eq('id', gymForm.manager_id)
     }
 
     await loadData()
-    setSaving(false)
-    setSaved(true)
-    setTimeout(() => setSaved(false), 3000)
+    setSaving(null)
+    setSaved('gym')
+    setTimeout(() => setSaved(null), 3000)
   }
 
   const handleAddGym = async (e: React.FormEvent) => {
@@ -141,28 +132,49 @@ export default function SettingsPage() {
   }
 
   const handleToggleActive = async (gym: GymWithManager) => {
-    await supabase.from('gyms')
-      .update({ is_active: !gym.is_active })
-      .eq('id', gym.id)
+    await supabase.from('gyms').update({ is_active: !gym.is_active }).eq('id', gym.id)
     loadData()
   }
 
   const handleSaveCommission = async () => {
-    setSaving(true)
+    setSaving('commission')
     await supabase.from('users').update({
       commission_signup_pct: parseFloat(commissionForm.signup_pct),
       commission_session_pct: parseFloat(commissionForm.session_pct),
     }).eq('role', 'trainer')
-    setSaving(false)
-    setSaved(true)
-    setTimeout(() => setSaved(false), 3000)
+    setSaving(null)
+    setSaved('commission')
+    setTimeout(() => setSaved(null), 3000)
   }
 
-  const set = (field: string) => (
-    e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>
-  ) => setForm(f => ({ ...f, [field]: e.target.value }))
+  const LogoUploadBox = ({
+    label, description, preview, onChange, id,
+  }: {
+    label: string; description: string; preview: string | null
+    onChange: (f: File) => void; id: string
+  }) => (
+    <div className="space-y-2">
+      <label className="label">{label}</label>
+      <p className="text-xs text-gray-400 -mt-1">{description}</p>
+      <div className="flex items-center gap-4">
+        <div className="w-24 h-24 rounded-xl border-2 border-dashed border-gray-200 flex items-center justify-center overflow-hidden bg-gray-50 flex-shrink-0">
+          {preview
+            ? <img src={preview} alt={label} className="w-full h-full object-contain p-1" />
+            : <ImageIcon className="w-8 h-8 text-gray-300" />
+          }
+        </div>
+        <div>
+          <label htmlFor={id} className="btn-secondary cursor-pointer flex items-center gap-2 text-xs">
+            <Upload className="w-3.5 h-3.5" /> Upload Image
+          </label>
+          <input id={id} type="file" accept="image/*" className="hidden"
+            onChange={e => { const f = e.target.files?.[0]; if (f) onChange(f) }} />
+          <p className="text-xs text-gray-400 mt-1">PNG, JPG or SVG. Recommended: transparent background.</p>
+        </div>
+      </div>
+    </div>
+  )
 
-  // Find managers not yet assigned (or assigned to this gym)
   const availableManagers = managers.filter(m =>
     !m.manager_gym_id || m.manager_gym_id === selectedGym?.id
   )
@@ -171,125 +183,125 @@ export default function SettingsPage() {
     <div className="space-y-6 max-w-2xl">
       <div>
         <h1 className="text-xl font-bold text-gray-900">Settings</h1>
-        <p className="text-sm text-gray-500">Manage gym clubs, logos and commission rates</p>
+        <p className="text-sm text-gray-500">Logos, gym clubs and commission rates</p>
       </div>
 
-      {/* Gym List */}
+      {/* ── GLOBAL LOGOS ── */}
+      <div className="card p-4 space-y-5">
+        <h2 className="font-semibold text-gray-900 text-sm flex items-center gap-2">
+          <ImageIcon className="w-4 h-4 text-green-600" /> Global Logo Settings
+        </h2>
+
+        <LogoUploadBox
+          id="login-logo"
+          label="Login Page Logo"
+          description="Shown on the login screen for all gym clubs"
+          preview={loginLogoPreview}
+          onChange={f => { setLoginLogoFile(f); setLoginLogoPreview(URL.createObjectURL(f)) }}
+        />
+
+        <LogoUploadBox
+          id="sidebar-logo"
+          label="Admin Sidebar Logo"
+          description="Shown in the left panel when an admin is logged in"
+          preview={sidebarLogoPreview}
+          onChange={f => { setSidebarLogoFile(f); setSidebarLogoPreview(URL.createObjectURL(f)) }}
+        />
+
+        <button onClick={handleSaveGlobalLogos} disabled={saving === 'logos'} className="btn-primary flex items-center gap-2">
+          {saved === 'logos'
+            ? <><CheckCircle className="w-4 h-4" /> Saved!</>
+            : <><Save className="w-4 h-4" /> {saving === 'logos' ? 'Saving...' : 'Save Global Logos'}</>
+          }
+        </button>
+      </div>
+
+      {/* ── GYM CLUBS ── */}
       <div className="card">
         <div className="flex items-center justify-between p-4 border-b border-gray-100">
           <h2 className="font-semibold text-gray-900 text-sm flex items-center gap-2">
             <Building2 className="w-4 h-4 text-green-600" /> Gym Clubs
           </h2>
-          <button onClick={() => setShowAddForm(!showAddForm)} className="btn-primary flex items-center gap-1.5 text-xs py-1.5">
+          <button onClick={() => setShowAddForm(!showAddForm)}
+            className="btn-primary flex items-center gap-1.5 text-xs py-1.5">
             <Plus className="w-3.5 h-3.5" /> Add Gym
           </button>
         </div>
 
         {showAddForm && (
           <form onSubmit={handleAddGym} className="p-4 border-b border-gray-100 bg-green-50 flex gap-2">
-            <input
-              className="input flex-1"
-              placeholder="New gym name..."
-              value={newGymName}
-              onChange={e => setNewGymName(e.target.value)}
-              required
-            />
+            <input className="input flex-1" placeholder="New gym name..."
+              value={newGymName} onChange={e => setNewGymName(e.target.value)} required />
             <button type="submit" className="btn-primary">Add</button>
             <button type="button" onClick={() => setShowAddForm(false)} className="btn-secondary">Cancel</button>
           </form>
         )}
 
-        {/* Gym selector tabs */}
+        {/* Gym tabs */}
         <div className="p-3 flex gap-2 flex-wrap border-b border-gray-100">
           {gyms.map(g => (
             <button key={g.id} onClick={() => selectGym(g)}
               className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ${
-                selectedGym?.id === g.id
-                  ? 'bg-green-600 text-white'
-                  : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+                selectedGym?.id === g.id ? 'bg-green-600 text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
               } ${!g.is_active ? 'opacity-50' : ''}`}>
-              {g.name}
-              {!g.is_active && ' (Inactive)'}
+              {g.name}{!g.is_active ? ' (Inactive)' : ''}
             </button>
           ))}
         </div>
 
-        {/* Gym details form */}
         {selectedGym && (
           <div className="p-4 space-y-4">
-            {/* Logo */}
-            <div>
-              <label className="label">Gym Logo</label>
-              <div className="flex items-center gap-4">
-                <div className="w-20 h-20 rounded-xl border-2 border-dashed border-gray-200 flex items-center justify-center overflow-hidden bg-gray-50 flex-shrink-0">
-                  {logoPreview
-                    ? <img src={logoPreview} alt="Logo" className="w-full h-full object-contain p-1" />
-                    : <Building2 className="w-8 h-8 text-gray-300" />
-                  }
-                </div>
-                <div>
-                  <label className="btn-secondary cursor-pointer flex items-center gap-2 text-xs">
-                    <Upload className="w-3.5 h-3.5" />
-                    {uploading ? 'Uploading...' : 'Upload Logo'}
-                    <input type="file" accept="image/*" className="hidden" onChange={handleLogoChange} />
-                  </label>
-                  <p className="text-xs text-gray-400 mt-1">PNG, JPG or SVG. Max 2MB.</p>
-                </div>
-              </div>
-            </div>
+            {/* Gym club logo */}
+            <LogoUploadBox
+              id="gym-logo"
+              label="Gym Club Logo"
+              description={`Shown in the sidebar for ${selectedGym.name} managers and trainers`}
+              preview={gymLogoPreview}
+              onChange={f => { setGymLogoFile(f); setGymLogoPreview(URL.createObjectURL(f)) }}
+            />
 
-            {/* Gym Name */}
             <div>
               <label className="label">Gym Name *</label>
-              <input className="input" required value={form.name} onChange={set('name')} placeholder="e.g. FitZone Orchard" />
+              <input className="input" required value={gymForm.name}
+                onChange={e => setGymForm(f => ({ ...f, name: e.target.value }))} />
             </div>
-
-            {/* Address */}
             <div>
               <label className="label">Address</label>
-              <input className="input" value={form.address} onChange={set('address')} placeholder="e.g. 391 Orchard Road, #B1-01, Singapore 238872" />
+              <input className="input" value={gymForm.address}
+                onChange={e => setGymForm(f => ({ ...f, address: e.target.value }))}
+                placeholder="e.g. 391 Orchard Road, #B1-01, Singapore 238872" />
             </div>
-
-            {/* Phone */}
             <div>
               <label className="label">Phone</label>
-              <input className="input" value={form.phone} onChange={set('phone')} placeholder="+65 6123 4567" />
+              <input className="input" value={gymForm.phone}
+                onChange={e => setGymForm(f => ({ ...f, phone: e.target.value }))}
+                placeholder="+65 6123 4567" />
             </div>
-
-            {/* Manager Assignment */}
             <div>
               <label className="label">Assigned Manager</label>
-              <select className="input" value={form.manager_id} onChange={set('manager_id')}>
+              <select className="input" value={gymForm.manager_id}
+                onChange={e => setGymForm(f => ({ ...f, manager_id: e.target.value }))}>
                 <option value="">— No manager assigned —</option>
                 {availableManagers.map(m => (
-                  <option key={m.id} value={m.id}>
-                    {m.full_name} ({m.email})
-                  </option>
+                  <option key={m.id} value={m.id}>{m.full_name} ({m.email})</option>
                 ))}
               </select>
-              {managers.length === 0 && (
-                <p className="text-xs text-amber-600 mt-1">
-                  ⚠ No manager accounts found. Create a manager account under Staff Management first.
-                </p>
-              )}
               {selectedGym.manager && (
-                <p className="text-xs text-green-600 mt-1">
-                  Currently assigned: {selectedGym.manager.full_name}
-                </p>
+                <p className="text-xs text-green-600 mt-1">Currently: {selectedGym.manager.full_name}</p>
+              )}
+              {managers.length === 0 && (
+                <p className="text-xs text-amber-600 mt-1">⚠ No manager accounts yet. Create one in Staff Management.</p>
               )}
             </div>
 
-            <div className="flex gap-2 pt-2">
-              <button onClick={handleSave} disabled={saving} className="btn-primary flex items-center gap-2 flex-1">
-                {saved
+            <div className="flex gap-2">
+              <button onClick={handleSaveGym} disabled={saving === 'gym'} className="btn-primary flex items-center gap-2 flex-1">
+                {saved === 'gym'
                   ? <><CheckCircle className="w-4 h-4" /> Saved!</>
-                  : <><Save className="w-4 h-4" /> {saving ? 'Saving...' : 'Save Gym Settings'}</>
+                  : <><Save className="w-4 h-4" /> {saving === 'gym' ? 'Saving...' : 'Save Gym Settings'}</>
                 }
               </button>
-              <button
-                onClick={() => handleToggleActive(selectedGym)}
-                className="btn-secondary text-xs"
-              >
+              <button onClick={() => handleToggleActive(selectedGym)} className="btn-secondary text-xs">
                 {selectedGym.is_active ? 'Deactivate' : 'Activate'}
               </button>
             </div>
@@ -297,12 +309,10 @@ export default function SettingsPage() {
         )}
       </div>
 
-      {/* Commission Rates */}
+      {/* ── COMMISSION RATES ── */}
       <div className="card p-4 space-y-4">
         <h2 className="font-semibold text-gray-900 text-sm">Default Commission Rates</h2>
-        <p className="text-xs text-gray-500">
-          These rates apply to all trainers. Individual rates can be overridden in Staff Management.
-        </p>
+        <p className="text-xs text-gray-500">Applied to all trainers. Override individually in Staff Management.</p>
         <div className="grid grid-cols-2 gap-3">
           <div>
             <label className="label">Sign-up Commission %</label>
@@ -319,10 +329,10 @@ export default function SettingsPage() {
             <p className="text-xs text-gray-400 mt-1">% of session price</p>
           </div>
         </div>
-        <button onClick={handleSaveCommission} disabled={saving} className="btn-primary flex items-center gap-2">
-          {saved
+        <button onClick={handleSaveCommission} disabled={saving === 'commission'} className="btn-primary flex items-center gap-2">
+          {saved === 'commission'
             ? <><CheckCircle className="w-4 h-4" /> Saved!</>
-            : <><Save className="w-4 h-4" /> Save Commission Rates</>
+            : <><Save className="w-4 h-4" /> {saving === 'commission' ? 'Saving...' : 'Save Commission Rates'}</>
           }
         </button>
       </div>
