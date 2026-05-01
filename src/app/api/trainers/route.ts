@@ -8,17 +8,18 @@ export async function POST(request: Request) {
     if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
     const { data: currentUser } = await serverClient
-      .from('users')
-      .select('role')
-      .eq('id', user.id)
-      .single()
+      .from('users').select('role').eq('id', user.id).single()
 
     if (!currentUser || !['admin', 'manager'].includes(currentUser.role)) {
       return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
     }
 
     const body = await request.json()
-    const { full_name, email, phone, commission_signup_pct, commission_session_pct, gym_ids, role } = body
+    const {
+      full_name, email, phone, role,
+      commission_signup_pct, commission_session_pct,
+      gym_ids, manager_gym_id,
+    } = body
 
     const adminClient = createAdminClient()
 
@@ -30,7 +31,7 @@ export async function POST(request: Request) {
 
     if (authError) return NextResponse.json({ error: authError.message }, { status: 400 })
 
-    const { error: userError } = await adminClient.from('users').insert({
+    const userPayload: any = {
       id: authData.user.id,
       full_name,
       email,
@@ -38,11 +39,18 @@ export async function POST(request: Request) {
       role: role || 'trainer',
       commission_signup_pct: parseFloat(commission_signup_pct) || 10,
       commission_session_pct: parseFloat(commission_session_pct) || 15,
-    })
+    }
 
+    // Manager is tied to one gym
+    if (role === 'manager' && manager_gym_id) {
+      userPayload.manager_gym_id = manager_gym_id
+    }
+
+    const { error: userError } = await adminClient.from('users').insert(userPayload)
     if (userError) return NextResponse.json({ error: userError.message }, { status: 400 })
 
-    if (gym_ids && gym_ids.length > 0) {
+    // Assign gyms for trainers
+    if (role === 'trainer' && gym_ids && gym_ids.length > 0) {
       const gymAssignments = gym_ids.map((gymId: string, idx: number) => ({
         trainer_id: authData.user.id,
         gym_id: gymId,
