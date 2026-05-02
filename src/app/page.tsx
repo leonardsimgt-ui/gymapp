@@ -2,10 +2,11 @@
 
 import { useEffect, useState } from 'react'
 import { createClient } from '@/lib/supabase-browser'
-import { Dumbbell, Building2 } from 'lucide-react'
+import { Dumbbell, Building2, Clock } from 'lucide-react'
 
 export default function LoginPage() {
   const [loginLogo, setLoginLogo] = useState<string | null>(null)
+  const [timedOut, setTimedOut] = useState(false)
   const supabase = createClient()
 
   useEffect(() => {
@@ -15,6 +16,11 @@ export default function LoginPage() {
       if (data?.login_logo_url) setLoginLogo(data.login_logo_url)
     }
     loadLogo()
+    // Check if redirected due to inactivity timeout
+    if (typeof window !== 'undefined') {
+      const params = new URLSearchParams(window.location.search)
+      if (params.get('reason') === 'timeout') setTimedOut(true)
+    }
   }, [])
 
   const handleGoogleLogin = async () => {
@@ -30,18 +36,26 @@ export default function LoginPage() {
 
         {/* Logo */}
         <div className="flex justify-center mb-4">
-          {loginLogo ? (
-            <img src={loginLogo} alt="Logo" className="h-16 w-auto object-contain" />
-          ) : (
-            <div className="bg-green-600 p-3 rounded-2xl">
-              <Dumbbell className="w-8 h-8 text-white" />
-            </div>
-          )}
+          {loginLogo
+            ? <img src={loginLogo} alt="Logo" className="h-16 w-auto object-contain" />
+            : <div className="bg-green-600 p-3 rounded-2xl"><Dumbbell className="w-8 h-8 text-white" /></div>
+          }
         </div>
 
         <h1 className="text-2xl font-bold text-gray-900 mb-1">GymApp</h1>
-        <p className="text-gray-500 text-sm mb-8">Trainer Management Platform</p>
+        <p className="text-gray-500 text-sm mb-6">Trainer Management Platform</p>
 
+        {/* Timeout notice */}
+        {timedOut && (
+          <div className="flex items-center gap-2 bg-amber-50 border border-amber-200 rounded-lg p-3 mb-6 text-left">
+            <Clock className="w-4 h-4 text-amber-600 flex-shrink-0" />
+            <p className="text-xs text-amber-700">
+              You were logged out automatically due to inactivity. Please sign in again.
+            </p>
+          </div>
+        )}
+
+        {/* Google login */}
         <button
           onClick={handleGoogleLogin}
           className="w-full flex items-center justify-center gap-3 border border-gray-200 rounded-lg px-4 py-3 text-sm font-medium text-gray-700 hover:bg-gray-50 transition-colors"
@@ -60,6 +74,7 @@ export default function LoginPage() {
           Contact your admin if you need an account.
         </p>
 
+        {/* Gym Library branding */}
         <div className="mt-8 pt-6 border-t border-gray-100 flex items-center justify-center gap-1.5">
           <Building2 className="w-3.5 h-3.5 text-gray-300" />
           <p className="text-xs text-gray-300 font-medium tracking-wide">Gym Library</p>
