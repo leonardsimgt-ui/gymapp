@@ -9,7 +9,7 @@ export default function ManagerTrainersPage() {
   const [currentUser, setCurrentUser] = useState<User | null>(null)
   const [gymId, setGymId] = useState<string | null>(null)
   const [gymName, setGymName] = useState('')
-  const [myTrainers, setMyTrainers] = useState<User[]>([])
+  const [myTrainers, setMyTrainers] = useState<any[]>([])
   const [unassignedTrainers, setUnassignedTrainers] = useState<User[]>([])
   const [search, setSearch] = useState('')
   const [showAdd, setShowAdd] = useState(false)
@@ -24,7 +24,6 @@ export default function ManagerTrainersPage() {
     full_name: '', email: '', phone: '',
     commission_signup_pct: '10', commission_session_pct: '15',
   })
-
   const [editForm, setEditForm] = useState({
     full_name: '', email: '', phone: '',
     commission_signup_pct: '10', commission_session_pct: '15',
@@ -32,9 +31,7 @@ export default function ManagerTrainersPage() {
 
   const supabase = createClient()
 
-  const showMsg = (msg: string) => {
-    setSuccess(msg); setTimeout(() => setSuccess(''), 3000)
-  }
+  const showMsg = (msg: string) => { setSuccess(msg); setTimeout(() => setSuccess(''), 3000) }
 
   useEffect(() => { loadData() }, [])
 
@@ -51,70 +48,52 @@ export default function ManagerTrainersPage() {
     const { data: gym } = await supabase.from('gyms').select('name').eq('id', userData.manager_gym_id).single()
     setGymName(gym?.name || '')
 
-    // Trainers currently in this gym
+    // Trainers assigned to this gym (pure trainers + manager-trainers)
     const { data: gymTrainers } = await supabase
       .from('trainer_gyms')
       .select('trainer_id, users(*)')
       .eq('gym_id', userData.manager_gym_id)
-    const myList = gymTrainers?.map((t: any) => t.users).filter(Boolean) || []
+
+    // Filter: show trainers and manager-trainers, but NOT pure managers
+    const myList = (gymTrainers || [])
+      .map((t: any) => t.users)
+      .filter((u: any) => u && (u.role === 'trainer' || (u.role === 'manager' && u.is_also_trainer)))
     setMyTrainers(myList)
 
-    // All active trainers NOT in any gym at all
-    // Step 1: get all assigned trainer_ids
-    const { data: allAssignments } = await supabase
-      .from('trainer_gyms')
-      .select('trainer_id')
-
+    // Unassigned pure trainers only (managers should not appear here)
+    const { data: allAssignments } = await supabase.from('trainer_gyms').select('trainer_id')
     const assignedSet = new Set((allAssignments || []).map((a: any) => a.trainer_id))
 
-    // Step 2: get all active trainers
     const { data: allTrainers } = await supabase
-      .from('users')
-      .select('*')
-      .eq('role', 'trainer')
-      .eq('is_active', true)
-      .eq('is_archived', false)
+      .from('users').select('*')
+      .eq('role', 'trainer')  // pure trainers only
+      .eq('is_active', true).eq('is_archived', false)
 
-    // Step 3: filter out assigned ones
-    const unassigned = (allTrainers || []).filter(t => !assignedSet.has(t.id))
-    setUnassignedTrainers(unassigned)
-
+    setUnassignedTrainers((allTrainers || []).filter(t => !assignedSet.has(t.id)))
     setLoading(false)
   }
 
   const handleAddExisting = async (trainerId: string) => {
     if (!gymId) return
-    setSaving(true)
-    setError('')
+    setSaving(true); setError('')
     const res = await fetch('/api/gym-assignments', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ trainer_id: trainerId, gym_id: gymId }),
     })
     const result = await res.json()
-    if (!res.ok) {
-      setError(result.error || 'Failed to add trainer')
-    } else {
-      showMsg('Trainer added to your gym')
-      setShowAdd(false)
-    }
-    await loadData()
-    setSaving(false)
+    if (!res.ok) { setError(result.error || 'Failed to add trainer') }
+    else { showMsg('Trainer added to your gym'); setShowAdd(false) }
+    await loadData(); setSaving(false)
   }
 
   const handleRemove = async (trainerId: string, trainerName: string) => {
-    if (!confirm(`Remove ${trainerName} from ${gymName}? Their account will remain active.`)) return
+    if (!confirm(`Remove ${trainerName} from ${gymName}? Their account stays active.`)) return
     const res = await fetch('/api/gym-assignments', {
-      method: 'DELETE',
-      headers: { 'Content-Type': 'application/json' },
+      method: 'DELETE', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ trainer_id: trainerId, gym_id: gymId }),
     })
-    const result = await res.json()
-    if (!res.ok) {
-      setError(result.error || 'Failed to remove trainer')
-    } else {
-      showMsg(`${trainerName} removed from ${gymName}`)
-    }
+    if (!res.ok) { const r = await res.json(); setError(r.error || 'Failed') }
+    else showMsg(`${trainerName} removed from ${gymName}`)
     await loadData()
   }
 
@@ -122,66 +101,48 @@ export default function ManagerTrainersPage() {
     e.preventDefault()
     if (!gymId) return
     setSaving(true); setError('')
-
     const res = await fetch('/api/trainers', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ ...newForm, role: 'trainer', gym_ids: [gymId] }),
     })
     const result = await res.json()
     if (!res.ok) { setError(result.error || 'Failed'); setSaving(false); return }
-
     setShowCreateNew(false)
     setNewForm({ full_name: '', email: '', phone: '', commission_signup_pct: '10', commission_session_pct: '15' })
-    showMsg('New trainer created and added to your gym')
-    setSaving(false)
-    await loadData()
+    showMsg('Trainer created and added to your gym')
+    setSaving(false); await loadData()
   }
 
   const openEditTrainer = (trainer: User) => {
     setEditingTrainer(trainer)
     setEditForm({
-      full_name: trainer.full_name,
-      email: trainer.email,
-      phone: trainer.phone || '',
+      full_name: trainer.full_name, email: trainer.email, phone: trainer.phone || '',
       commission_signup_pct: trainer.commission_signup_pct?.toString() || '10',
       commission_session_pct: trainer.commission_session_pct?.toString() || '15',
     })
-    setShowAdd(false)
-    setShowCreateNew(false)
-    setError('')
+    setShowAdd(false); setShowCreateNew(false); setError('')
   }
 
   const handleEditTrainer = async (e: React.FormEvent) => {
     e.preventDefault()
     if (!editingTrainer) return
     setSaving(true); setError('')
-
     const res = await fetch('/api/trainers', {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
+      method: 'PATCH', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ userId: editingTrainer.id, ...editForm }),
     })
     const result = await res.json()
     if (!res.ok) { setError(result.error || 'Failed'); setSaving(false); return }
-
-    setEditingTrainer(null)
-    showMsg('Trainer profile updated')
-    setSaving(false)
-    await loadData()
+    setEditingTrainer(null); showMsg('Trainer updated'); setSaving(false); await loadData()
   }
 
-  const filteredMine = myTrainers.filter(t =>
-    t.full_name.toLowerCase().includes(search.toLowerCase()) ||
-    t.email.toLowerCase().includes(search.toLowerCase()) ||
+  const filtered = myTrainers.filter(t =>
+    t.full_name?.toLowerCase().includes(search.toLowerCase()) ||
+    t.email?.toLowerCase().includes(search.toLowerCase()) ||
     (t.phone || '').includes(search)
   )
 
-  if (loading) return (
-    <div className="flex items-center justify-center h-48">
-      <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-green-600" />
-    </div>
-  )
+  if (loading) return <div className="flex items-center justify-center h-48"><div className="animate-spin rounded-full h-6 w-6 border-b-2 border-green-600" /></div>
 
   if (!gymId) return (
     <div className="card p-8 text-center">
@@ -210,7 +171,6 @@ export default function ManagerTrainersPage() {
         </div>
       </div>
 
-      {/* Banners */}
       {success && (
         <div className="flex items-center gap-2 bg-green-50 border border-green-200 rounded-lg p-3 text-sm text-green-700">
           <CheckCircle className="w-4 h-4 flex-shrink-0" /> {success}
@@ -223,18 +183,18 @@ export default function ManagerTrainersPage() {
         </div>
       )}
 
-      {/* Add existing panel */}
+      {/* Add existing */}
       {showAdd && (
         <div className="card p-4 space-y-3 border-blue-200 bg-blue-50">
           <div className="flex items-center justify-between">
             <p className="text-sm font-medium text-gray-900">Add Existing Trainer to {gymName}</p>
             <button onClick={() => setShowAdd(false)}><X className="w-4 h-4 text-gray-400" /></button>
           </div>
-          <p className="text-xs text-gray-500">Only trainers not currently assigned to any gym are shown below.</p>
+          <p className="text-xs text-gray-500">Only trainers not currently assigned to any gym are listed.</p>
           {unassignedTrainers.length === 0 ? (
             <div className="bg-white rounded-lg p-4 text-center border border-gray-200">
               <p className="text-sm text-gray-500">No unassigned trainers available</p>
-              <p className="text-xs text-gray-400 mt-1">All active trainers are already assigned to a gym. Use "Create New" to add a new trainer.</p>
+              <p className="text-xs text-gray-400 mt-1">Use "Create New" to add a new trainer instead.</p>
             </div>
           ) : (
             <div className="space-y-2">
@@ -255,7 +215,7 @@ export default function ManagerTrainersPage() {
         </div>
       )}
 
-      {/* Create new form */}
+      {/* Create new */}
       {showCreateNew && (
         <form onSubmit={handleCreateNew} className="card p-4 space-y-3 border-green-200">
           <div className="flex items-center justify-between">
@@ -266,12 +226,12 @@ export default function ManagerTrainersPage() {
             <div>
               <label className="label">Full Name *</label>
               <input className="input" required value={newForm.full_name}
-                onChange={e => setNewForm(f => ({ ...f, full_name: e.target.value }))} placeholder="e.g. Sarah Tan" />
+                onChange={e => setNewForm(f => ({ ...f, full_name: e.target.value }))} />
             </div>
             <div>
               <label className="label">Email *</label>
               <input className="input" required type="email" value={newForm.email}
-                onChange={e => setNewForm(f => ({ ...f, email: e.target.value }))} placeholder="sarah@gym.com" />
+                onChange={e => setNewForm(f => ({ ...f, email: e.target.value }))} />
             </div>
           </div>
           <div>
@@ -302,7 +262,7 @@ export default function ManagerTrainersPage() {
         </form>
       )}
 
-      {/* Edit trainer form */}
+      {/* Edit trainer */}
       {editingTrainer && (
         <form onSubmit={handleEditTrainer} className="card p-4 space-y-3 border-blue-200">
           <div className="flex items-center justify-between">
@@ -316,7 +276,7 @@ export default function ManagerTrainersPage() {
                 onChange={e => setEditForm(f => ({ ...f, full_name: e.target.value }))} />
             </div>
             <div>
-              <label className="label">Email Address *</label>
+              <label className="label">Email *</label>
               <input className="input" required type="email" value={editForm.email}
                 onChange={e => setEditForm(f => ({ ...f, email: e.target.value }))} />
             </div>
@@ -360,7 +320,7 @@ export default function ManagerTrainersPage() {
       )}
 
       {/* Trainer list */}
-      {filteredMine.length === 0 ? (
+      {filtered.length === 0 ? (
         <div className="card p-8 text-center">
           <Dumbbell className="w-10 h-10 text-gray-300 mx-auto mb-3" />
           <p className="text-gray-500 text-sm">
@@ -369,17 +329,22 @@ export default function ManagerTrainersPage() {
         </div>
       ) : (
         <div className="space-y-2">
-          {filteredMine.map(trainer => (
+          {filtered.map((trainer: any) => (
             <div key={trainer.id} className="card p-4 flex items-center gap-3">
               <div className="w-10 h-10 bg-green-100 rounded-full flex items-center justify-center flex-shrink-0">
-                <span className="text-green-700 font-semibold text-sm">{trainer.full_name.charAt(0)}</span>
+                <span className="text-green-700 font-semibold text-sm">{trainer.full_name?.charAt(0)}</span>
               </div>
               <div className="flex-1 min-w-0">
-                <div className="flex items-center gap-2">
+                <div className="flex items-center gap-2 flex-wrap">
                   <p className="font-medium text-gray-900 text-sm truncate">{trainer.full_name}</p>
                   <span className={trainer.is_active ? 'badge-active' : 'badge-inactive'}>
                     {trainer.is_active ? 'Active' : 'Inactive'}
                   </span>
+                  {trainer.role === 'manager' && trainer.is_also_trainer && (
+                    <span className="bg-yellow-100 text-yellow-800 inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium">
+                      Manager / Trainer
+                    </span>
+                  )}
                 </div>
                 <p className="text-xs text-gray-500 truncate">{trainer.email}</p>
                 {trainer.phone && <p className="text-xs text-gray-400">{trainer.phone}</p>}
@@ -389,15 +354,16 @@ export default function ManagerTrainersPage() {
               </div>
               <div className="flex items-center gap-1 flex-shrink-0">
                 <button onClick={() => openEditTrainer(trainer)}
-                  className="p-2 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
-                  title="Edit trainer">
+                  className="p-2 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors">
                   <Edit2 className="w-4 h-4" />
                 </button>
-                <button onClick={() => handleRemove(trainer.id, trainer.full_name)}
-                  className="p-2 text-gray-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition-colors"
-                  title="Remove from gym">
-                  <UserMinus className="w-4 h-4" />
-                </button>
+                {/* Don't allow removing yourself */}
+                {trainer.id !== currentUser?.id && (
+                  <button onClick={() => handleRemove(trainer.id, trainer.full_name)}
+                    className="p-2 text-gray-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition-colors">
+                    <UserMinus className="w-4 h-4" />
+                  </button>
+                )}
               </div>
             </div>
           ))}
