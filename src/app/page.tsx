@@ -1,18 +1,22 @@
 'use client'
 
 import { useEffect, useState } from 'react'
-import { createClient } from '@/lib/supabase-browser'
+import { createClient } from '@supabase/supabase-js'
 import { Dumbbell, Building2, Clock } from 'lucide-react'
+
+// Use a direct anon client — no auth session needed to read app_settings
+const anonClient = createClient(
+  process.env.NEXT_PUBLIC_SUPABASE_URL!,
+  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+)
 
 export default function LoginPage() {
   const [loginLogo, setLoginLogo] = useState<string | null>(null)
   const [appName, setAppName] = useState('GymApp')
   const [timedOut, setTimedOut] = useState(false)
   const [loaded, setLoaded] = useState(false)
-  const supabase = createClient()
 
   useEffect(() => {
-    // Check if redirected due to inactivity timeout
     if (typeof window !== 'undefined') {
       const params = new URLSearchParams(window.location.search)
       if (params.get('reason') === 'timeout') setTimedOut(true)
@@ -20,7 +24,7 @@ export default function LoginPage() {
 
     const loadSettings = async () => {
       try {
-        const { data, error } = await supabase
+        const { data, error } = await anonClient
           .from('app_settings')
           .select('login_logo_url, app_name')
           .eq('id', 'global')
@@ -29,15 +33,14 @@ export default function LoginPage() {
         if (!error && data) {
           if (data.app_name) setAppName(data.app_name)
           if (data.login_logo_url) {
-            // Cache bust to force browser to reload the latest uploaded image
-            const cacheBusted = data.login_logo_url.includes('?')
-              ? data.login_logo_url.split('?')[0] + '?t=' + Date.now()
-              : data.login_logo_url + '?t=' + Date.now()
-            setLoginLogo(cacheBusted)
+            // Strip any existing query string and add fresh cache buster
+            const baseUrl = data.login_logo_url.split('?')[0]
+            setLoginLogo(baseUrl + '?t=' + Date.now())
           }
         }
       } catch (e) {
-        // Settings table may not exist yet on first run — fall back to defaults
+        // Fall back to defaults silently
+        console.log('Settings not available yet:', e)
       } finally {
         setLoaded(true)
       }
@@ -47,13 +50,12 @@ export default function LoginPage() {
   }, [])
 
   const handleGoogleLogin = async () => {
-    await supabase.auth.signInWithOAuth({
+    await anonClient.auth.signInWithOAuth({
       provider: 'google',
       options: { redirectTo: `${window.location.origin}/auth/callback` },
     })
   }
 
-  // Don't flash the default logo before the real one loads
   if (!loaded) {
     return (
       <div className="min-h-screen bg-gradient-to-br from-green-50 to-gray-100 flex items-center justify-center">
@@ -73,7 +75,10 @@ export default function LoginPage() {
               src={loginLogo}
               alt={appName}
               className="h-20 w-auto object-contain"
-              onError={() => setLoginLogo(null)}
+              onError={(e) => {
+                console.log('Logo failed to load:', loginLogo)
+                setLoginLogo(null)
+              }}
             />
           ) : (
             <div className="bg-green-600 p-3 rounded-2xl">
@@ -114,7 +119,6 @@ export default function LoginPage() {
           Contact your admin if you need an account.
         </p>
 
-        {/* Gym Library branding */}
         <div className="mt-8 pt-6 border-t border-gray-100 flex items-center justify-center gap-1.5">
           <Building2 className="w-3.5 h-3.5 text-gray-300" />
           <p className="text-xs text-gray-300 font-medium tracking-wide">Gym Library</p>
