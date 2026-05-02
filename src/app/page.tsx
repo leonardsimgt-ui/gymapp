@@ -1,46 +1,57 @@
 'use client'
 
 import { useEffect, useState } from 'react'
-import { createClient } from '@supabase/supabase-js'
-import { Dumbbell, Building2, Clock } from 'lucide-react'
-
-// Use a direct anon client — no auth session needed to read app_settings
-const anonClient = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
-)
+import { createClient } from '@/lib/supabase-browser'
+import { Dumbbell, Building2, Clock, AlertCircle } from 'lucide-react'
 
 export default function LoginPage() {
   const [loginLogo, setLoginLogo] = useState<string | null>(null)
   const [appName, setAppName] = useState('GymApp')
   const [timedOut, setTimedOut] = useState(false)
+  const [authError, setAuthError] = useState<string | null>(null)
   const [loaded, setLoaded] = useState(false)
+
+  // CRITICAL: Use the shared browser client — a separate instance breaks session cookies
+  const supabase = createClient()
 
   useEffect(() => {
     if (typeof window !== 'undefined') {
       const params = new URLSearchParams(window.location.search)
       if (params.get('reason') === 'timeout') setTimedOut(true)
+      const err = params.get('error')
+      if (err === 'not_authorised') {
+        setAuthError('Your Google account is not authorised. Contact your admin to be added as staff.')
+      } else if (err === 'account_disabled') {
+        setAuthError('Your account has been disabled. Contact your admin.')
+      } else if (err === 'auth_failed') {
+        setAuthError('Login failed. Please try again.')
+      }
     }
 
     const loadSettings = async () => {
       try {
-        const { data, error } = await anonClient
-          .from('app_settings')
-          .select('login_logo_url, app_name')
-          .eq('id', 'global')
-          .single()
-
-        if (!error && data) {
-          if (data.app_name) setAppName(data.app_name)
-          if (data.login_logo_url) {
-            // Strip any existing query string and add fresh cache buster
-            const baseUrl = data.login_logo_url.split('?')[0]
-            setLoginLogo(baseUrl + '?t=' + Date.now())
+        // Fetch logo via direct REST — doesn't require an auth session
+        const res = await fetch(
+          `${process.env.NEXT_PUBLIC_SUPABASE_URL}/rest/v1/app_settings?id=eq.global&select=login_logo_url,app_name`,
+          {
+            headers: {
+              apikey: process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+              Authorization: `Bearer ${process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!}`,
+            },
+          }
+        )
+        if (res.ok) {
+          const data = await res.json()
+          if (data?.[0]) {
+            if (data[0].app_name) setAppName(data[0].app_name)
+            if (data[0].login_logo_url) {
+              const baseUrl = data[0].login_logo_url.split('?')[0]
+              setLoginLogo(baseUrl + '?t=' + Date.now())
+            }
           }
         }
       } catch (e) {
         // Fall back to defaults silently
-        console.log('Settings not available yet:', e)
       } finally {
         setLoaded(true)
       }
@@ -50,9 +61,13 @@ export default function LoginPage() {
   }, [])
 
   const handleGoogleLogin = async () => {
-    await anonClient.auth.signInWithOAuth({
+    setAuthError(null)
+    // Use the shared browser client — this is critical for session cookies
+    await supabase.auth.signInWithOAuth({
       provider: 'google',
-      options: { redirectTo: `${window.location.origin}/auth/callback` },
+      options: {
+        redirectTo: `${window.location.origin}/auth/callback`,
+      },
     })
   }
 
@@ -75,10 +90,7 @@ export default function LoginPage() {
               src={loginLogo}
               alt={appName}
               className="h-20 w-auto object-contain"
-              onError={(e) => {
-                console.log('Logo failed to load:', loginLogo)
-                setLoginLogo(null)
-              }}
+              onError={() => setLoginLogo(null)}
             />
           ) : (
             <div className="bg-green-600 p-3 rounded-2xl">
@@ -92,11 +104,19 @@ export default function LoginPage() {
 
         {/* Timeout notice */}
         {timedOut && (
-          <div className="flex items-center gap-2 bg-amber-50 border border-amber-200 rounded-lg p-3 mb-6 text-left">
+          <div className="flex items-center gap-2 bg-amber-50 border border-amber-200 rounded-lg p-3 mb-4 text-left">
             <Clock className="w-4 h-4 text-amber-600 flex-shrink-0" />
             <p className="text-xs text-amber-700">
               You were logged out due to inactivity. Please sign in again.
             </p>
+          </div>
+        )}
+
+        {/* Auth error notice */}
+        {authError && (
+          <div className="flex items-start gap-2 bg-red-50 border border-red-200 rounded-lg p-3 mb-4 text-left">
+            <AlertCircle className="w-4 h-4 text-red-500 flex-shrink-0 mt-0.5" />
+            <p className="text-xs text-red-700">{authError}</p>
           </div>
         )}
 
