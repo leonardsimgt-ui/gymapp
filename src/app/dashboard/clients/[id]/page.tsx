@@ -5,13 +5,13 @@ import { useParams, useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase-browser'
 import { Client, Package, Session, User, PackageTemplate } from '@/types'
 import { formatDate, formatDateTime, formatSGD, getSessionsRemaining } from '@/lib/utils'
-import { ArrowLeft, Phone, Mail, Heart, Package as PkgIcon, Calendar, Plus, Edit } from 'lucide-react'
+import { ArrowLeft, Phone, Heart, Package as PkgIcon, Calendar, Plus, Edit } from 'lucide-react'
 import Link from 'next/link'
 import { cn } from '@/lib/utils'
 
-export default function ClientDetailPage() {
+export default function MemberDetailPage() {
   const { id } = useParams()
-  const [client, setClient] = useState<Client | null>(null)
+  const [member, setMember] = useState<Client | null>(null)
   const [packages, setPackages] = useState<Package[]>([])
   const [sessions, setSessions] = useState<Session[]>([])
   const [templates, setTemplates] = useState<PackageTemplate[]>([])
@@ -28,9 +28,9 @@ export default function ClientDetailPage() {
       const { data: userData } = await supabase.from('users').select('*').eq('id', authUser.id).single()
       setCurrentUser(userData)
 
-      const { data: clientData } = await supabase
+      const { data: memberData } = await supabase
         .from('clients').select('*, gyms(name), users(full_name)').eq('id', id).single()
-      setClient(clientData)
+      setMember(memberData)
 
       const { data: pkgData } = await supabase
         .from('packages').select('*').eq('client_id', id).order('created_at', { ascending: false })
@@ -53,7 +53,7 @@ export default function ClientDetailPage() {
 
   const handleAssignPackage = async (e: React.FormEvent) => {
     e.preventDefault()
-    if (!client || !currentUser) return
+    if (!member || !currentUser) return
     setLoading(true)
 
     const tpl = templates.find(t => t.id === pkgForm.template_id)
@@ -61,9 +61,9 @@ export default function ClientDetailPage() {
 
     const { error } = await supabase.from('packages').insert({
       template_id: pkgForm.template_id,
-      client_id: client.id,
+      client_id: member.id,
       trainer_id: currentUser.id,
-      gym_id: client.gym_id,
+      gym_id: member.gym_id,
       package_name: tpl.name,
       total_sessions: tpl.total_sessions,
       total_price_sgd: parseFloat(pkgForm.total_price_sgd),
@@ -81,9 +81,10 @@ export default function ClientDetailPage() {
     setLoading(false)
   }
 
-  if (!client) return <div className="flex items-center justify-center h-48"><div className="animate-spin rounded-full h-6 w-6 border-b-2 border-green-600" /></div>
+  if (!member) return <div className="flex items-center justify-center h-48"><div className="animate-spin rounded-full h-6 w-6 border-b-2 border-green-600" /></div>
 
-  const isTrainer = currentUser?.role === 'trainer'
+  const isTrainer = currentUser?.role === 'trainer' ||
+    (currentUser?.role === 'manager' && (currentUser as any)?.is_also_trainer)
   const activePackage = packages.find(p => p.status === 'active')
 
   return (
@@ -93,34 +94,28 @@ export default function ClientDetailPage() {
           <ArrowLeft className="w-4 h-4 text-gray-600" />
         </Link>
         <div className="flex-1">
-          <h1 className="text-xl font-bold text-gray-900">{client.full_name}</h1>
-          <p className="text-xs text-gray-500 capitalize">{client.status} · {(client as any).gyms?.name}</p>
+          <h1 className="text-xl font-bold text-gray-900">{member.full_name}</h1>
+          <p className="text-xs text-gray-500 capitalize">{member.status} member · {(member as any).gyms?.name}</p>
         </div>
         {isTrainer && (
-          <Link href={`/dashboard/clients/${client.id}/edit`} className="btn-secondary flex items-center gap-1.5">
+          <Link href={`/dashboard/clients/${member.id}/edit`} className="btn-secondary flex items-center gap-1.5">
             <Edit className="w-3.5 h-3.5" /> Edit
           </Link>
         )}
       </div>
 
-      {/* Client Info */}
+      {/* Member Info */}
       <div className="card p-4 space-y-3">
         <h2 className="font-semibold text-gray-900 text-sm">Contact & Health</h2>
         <div className="space-y-2 text-sm">
           <div className="flex items-center gap-2 text-gray-600">
             <Phone className="w-4 h-4 text-gray-400" />
-            <a href={`tel:${client.phone}`} className="hover:text-green-600">{client.phone}</a>
+            <a href={`tel:${member.phone}`} className="hover:text-green-600">{member.phone}</a>
           </div>
-          {client.email && (
-            <div className="flex items-center gap-2 text-gray-600">
-              <Mail className="w-4 h-4 text-gray-400" />
-              <a href={`mailto:${client.email}`} className="hover:text-green-600">{client.email}</a>
-            </div>
-          )}
-          {client.health_notes && (
+          {member.health_notes && (
             <div className="flex items-start gap-2 text-gray-600">
               <Heart className="w-4 h-4 text-gray-400 mt-0.5 flex-shrink-0" />
-              <p className="text-xs bg-red-50 text-red-700 rounded-lg px-3 py-2">{client.health_notes}</p>
+              <p className="text-xs bg-red-50 text-red-700 rounded-lg px-3 py-2">{member.health_notes}</p>
             </div>
           )}
         </div>
@@ -133,7 +128,8 @@ export default function ClientDetailPage() {
             <PkgIcon className="w-4 h-4 text-green-600" /> Packages
           </h2>
           {isTrainer && (
-            <button onClick={() => setShowPkgForm(!showPkgForm)} className="btn-primary flex items-center gap-1 text-xs py-1.5">
+            <button onClick={() => setShowPkgForm(!showPkgForm)}
+              className="btn-primary flex items-center gap-1 text-xs py-1.5">
               <Plus className="w-3.5 h-3.5" /> Assign Package
             </button>
           )}
@@ -142,7 +138,8 @@ export default function ClientDetailPage() {
         {showPkgForm && (
           <form onSubmit={handleAssignPackage} className="p-4 border-b border-gray-100 bg-green-50 space-y-3">
             <p className="text-sm font-medium text-gray-700">Assign New Package</p>
-            <select className="input" required value={pkgForm.template_id} onChange={e => handleTemplateChange(e.target.value)}>
+            <select className="input" required value={pkgForm.template_id}
+              onChange={e => handleTemplateChange(e.target.value)}>
               <option value="">Select package template...</option>
               {templates.map(t => (
                 <option key={t.id} value={t.id}>{t.name} ({t.total_sessions} sessions)</option>
@@ -183,10 +180,8 @@ export default function ClientDetailPage() {
                       <p className="font-medium text-gray-900 text-sm">{pkg.package_name}</p>
                       <p className="text-xs text-gray-500">Started {formatDate(pkg.start_date)}</p>
                     </div>
-                    <span className={cn(
-                      'text-xs font-medium px-2 py-0.5 rounded-full',
-                      pkg.status === 'active' ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-600'
-                    )}>
+                    <span className={cn('text-xs font-medium px-2 py-0.5 rounded-full',
+                      pkg.status === 'active' ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-600')}>
                       {pkg.status}
                     </span>
                   </div>
@@ -208,14 +203,15 @@ export default function ClientDetailPage() {
         )}
       </div>
 
-      {/* Recent Sessions */}
+      {/* Sessions */}
       <div className="card">
         <div className="flex items-center justify-between p-4 border-b border-gray-100">
           <h2 className="font-semibold text-gray-900 text-sm flex items-center gap-2">
             <Calendar className="w-4 h-4 text-green-600" /> Sessions
           </h2>
           {isTrainer && activePackage && (
-            <Link href={`/dashboard/sessions/new?client=${client.id}&package=${activePackage.id}`} className="btn-primary flex items-center gap-1 text-xs py-1.5">
+            <Link href={`/dashboard/sessions/new?client=${member.id}&package=${activePackage.id}`}
+              className="btn-primary flex items-center gap-1 text-xs py-1.5">
               <Plus className="w-3.5 h-3.5" /> Schedule
             </Link>
           )}
@@ -226,24 +222,20 @@ export default function ClientDetailPage() {
           <div className="divide-y divide-gray-100">
             {sessions.slice(0, 10).map(session => (
               <div key={session.id} className="p-4 flex items-center gap-3">
-                <div className={cn(
-                  'w-2 h-2 rounded-full flex-shrink-0',
+                <div className={cn('w-2 h-2 rounded-full flex-shrink-0',
                   session.status === 'completed' ? 'bg-green-500' :
                   session.status === 'scheduled' ? 'bg-blue-500' :
-                  session.status === 'cancelled' ? 'bg-gray-400' : 'bg-red-400'
-                )} />
+                  session.status === 'cancelled' ? 'bg-gray-400' : 'bg-red-400')} />
                 <div className="flex-1 min-w-0">
                   <p className="text-sm text-gray-900">{formatDateTime(session.scheduled_at)}</p>
                   {session.performance_notes && (
                     <p className="text-xs text-gray-500 truncate">{session.performance_notes}</p>
                   )}
                 </div>
-                <span className={cn(
-                  'text-xs px-2 py-0.5 rounded-full capitalize',
+                <span className={cn('text-xs px-2 py-0.5 rounded-full capitalize',
                   session.status === 'completed' ? 'bg-green-100 text-green-700' :
                   session.status === 'scheduled' ? 'bg-blue-100 text-blue-700' :
-                  'bg-gray-100 text-gray-600'
-                )}>
+                  'bg-gray-100 text-gray-600')}>
                   {session.status}
                 </span>
               </div>
