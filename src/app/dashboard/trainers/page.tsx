@@ -5,8 +5,7 @@ import { createClient } from '@/lib/supabase-browser'
 import { User, Gym } from '@/types'
 import {
   Plus, UserCheck, Shield, Users, Briefcase, Dumbbell,
-  Edit2, Trash2, X, Save, CheckCircle, AlertCircle,
-  Archive, Building2
+  Edit2, Trash2, X, Save, CheckCircle, AlertCircle, Archive, Building2
 } from 'lucide-react'
 import { formatDateTime } from '@/lib/utils'
 import { cn } from '@/lib/utils'
@@ -15,7 +14,7 @@ const ALL_ROLES = [
   { value: 'admin', label: 'Admin', icon: Shield, description: 'Backend config only — Gym Library' },
   { value: 'business_ops', label: 'Business Ops', icon: Briefcase, description: 'View all gyms and reports' },
   { value: 'manager', label: 'Manager', icon: Users, description: 'Manage one gym club' },
-  { value: 'trainer', label: 'Trainer', icon: Dumbbell, description: 'Manage own clients and sessions' },
+  { value: 'trainer', label: 'Trainer', icon: Dumbbell, description: 'Manage own members and sessions' },
 ]
 
 const roleBadge: Record<string, string> = {
@@ -25,14 +24,23 @@ const roleBadge: Record<string, string> = {
   business_ops: 'bg-purple-100 text-purple-700',
 }
 
-// Roles that require a mandatory phone number
-const PHONE_REQUIRED_ROLES = ['admin', 'manager']
-
 interface StaffMember extends User {
   trainer_gyms?: { gym_id: string; gyms: { name: string } }[]
   manager_gym?: { name: string }
   manager_gym_id?: string
   is_also_trainer?: boolean
+}
+
+const emptyCreate = {
+  full_name: '', email: '', phone: '', role: 'trainer',
+  commission_signup_pct: '10', commission_session_pct: '15',
+  gym_ids: [] as string[], manager_gym_id: '', is_also_trainer: false,
+}
+
+const emptyEdit = {
+  full_name: '', email: '', phone: '', role: '', is_active: true,
+  commission_signup_pct: '10', commission_session_pct: '15',
+  gym_ids: [] as string[], manager_gym_id: '', is_also_trainer: false,
 }
 
 export default function TrainersPage() {
@@ -47,19 +55,8 @@ export default function TrainersPage() {
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
   const [success, setSuccess] = useState('')
-
-  const [createForm, setCreateForm] = useState({
-    full_name: '', email: '', phone: '', role: 'trainer',
-    commission_signup_pct: '10', commission_session_pct: '15',
-    gym_ids: [] as string[], manager_gym_id: '', is_also_trainer: false,
-  })
-
-  const [editForm, setEditForm] = useState({
-    full_name: '', email: '', phone: '', role: '', is_active: true,
-    commission_signup_pct: '10', commission_session_pct: '15',
-    gym_ids: [] as string[], manager_gym_id: '', is_also_trainer: false,
-  })
-
+  const [createForm, setCreateForm] = useState({ ...emptyCreate })
+  const [editForm, setEditForm] = useState({ ...emptyEdit })
   const supabase = createClient()
 
   const loadData = async () => {
@@ -89,24 +86,22 @@ export default function TrainersPage() {
   const showSuccess = (msg: string) => { setSuccess(msg); setTimeout(() => setSuccess(''), 3000) }
 
   const handleCreate = async (e: React.FormEvent) => {
-    e.preventDefault()
-    setSaving(true); setError('')
+    e.preventDefault(); setSaving(true); setError('')
     const res = await fetch('/api/trainers', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(createForm),
     })
     const result = await res.json()
     if (!res.ok) { setError(result.error || 'Failed'); setSaving(false); return }
-    await loadData(); setShowCreateForm(false); resetCreateForm()
+    await loadData(); setShowCreateForm(false); setCreateForm({ ...emptyCreate })
     setSaving(false); showSuccess('Account created successfully')
   }
 
   const openEdit = (member: StaffMember) => {
     setEditingUser(member)
     setEditForm({
-      full_name: member.full_name, email: member.email,
-      phone: member.phone || '', role: member.role,
-      is_active: member.is_active,
+      full_name: member.full_name, email: member.email, phone: member.phone || '',
+      role: member.role, is_active: member.is_active,
       commission_signup_pct: member.commission_signup_pct?.toString() || '10',
       commission_session_pct: member.commission_session_pct?.toString() || '15',
       gym_ids: member.trainer_gyms?.map(tg => tg.gym_id) || [],
@@ -117,8 +112,7 @@ export default function TrainersPage() {
   }
 
   const handleEdit = async (e: React.FormEvent) => {
-    e.preventDefault()
-    if (!editingUser) return
+    e.preventDefault(); if (!editingUser) return
     setSaving(true); setError('')
     const res = await fetch('/api/trainers', {
       method: 'PATCH', headers: { 'Content-Type': 'application/json' },
@@ -141,7 +135,7 @@ export default function TrainersPage() {
   }
 
   const handleArchive = async (member: StaffMember) => {
-    if (!confirm(`Archive ${member.full_name}?`)) return
+    if (!confirm(`Archive ${member.full_name}? Their account will be disabled.`)) return
     setSaving(true)
     const res = await fetch('/api/trainers', {
       method: 'DELETE', headers: { 'Content-Type': 'application/json' },
@@ -152,12 +146,6 @@ export default function TrainersPage() {
     await loadData(); setSaving(false); showSuccess(`${member.full_name} archived`)
   }
 
-  const resetCreateForm = () => setCreateForm({
-    full_name: '', email: '', phone: '', role: 'trainer',
-    commission_signup_pct: '10', commission_session_pct: '15',
-    gym_ids: [], manager_gym_id: '', is_also_trainer: false,
-  })
-
   const toggleGym = (gymId: string, type: 'create' | 'edit') => {
     if (type === 'create') {
       setCreateForm(f => ({ ...f, gym_ids: f.gym_ids.includes(gymId) ? f.gym_ids.filter(g => g !== gymId) : [...f.gym_ids, gymId] }))
@@ -166,7 +154,7 @@ export default function TrainersPage() {
     }
   }
 
-  const getGymLabel = (member: StaffMember): string => {
+  const getGymLabel = (member: StaffMember) => {
     if (member.role === 'trainer') {
       const names = member.trainer_gyms?.map(tg => (tg.gyms as any)?.name).filter(Boolean) || []
       return names.length > 0 ? names.join(', ') : 'Unassigned'
@@ -177,7 +165,6 @@ export default function TrainersPage() {
     return '—'
   }
 
-  const isPhoneRequired = (role: string) => PHONE_REQUIRED_ROLES.includes(role)
   const filteredStaff = filterRole === 'all' ? staff : staff.filter(s => s.role === filterRole)
   const isSelf = (m: StaffMember) => m.id === currentUser?.id
 
@@ -190,17 +177,6 @@ export default function TrainersPage() {
     )
   }
 
-  const PhoneField = ({ value, onChange, required }: { value: string; onChange: (v: string) => void; required: boolean }) => (
-    <div>
-      <label className="label">
-        Phone {required ? <span className="text-red-500">*</span> : <span className="text-gray-400 text-xs">(optional)</span>}
-      </label>
-      <input className="input" type="tel" value={value} required={required}
-        onChange={e => onChange(e.target.value)} placeholder="+65 9123 4567" />
-      {required && <p className="text-xs text-gray-400 mt-1">Required for admin and manager accounts</p>}
-    </div>
-  )
-
   const AlsoTrainerToggle = ({ value, onChange }: { value: boolean; onChange: (v: boolean) => void }) => (
     <div className={cn('flex items-start gap-3 p-3 rounded-lg border cursor-pointer transition-colors',
       value ? 'border-green-500 bg-green-50' : 'border-gray-200 hover:border-gray-300')}
@@ -211,9 +187,42 @@ export default function TrainersPage() {
       </div>
       <div>
         <p className="text-sm font-medium text-gray-900">Also acts as a Trainer</p>
-        <p className="text-xs text-gray-500 mt-0.5">Manager can manage own clients, schedule sessions and earn trainer commissions.</p>
+        <p className="text-xs text-gray-500 mt-0.5">Can manage own members, schedule sessions and earn trainer commissions.</p>
       </div>
     </div>
+  )
+
+  // Shared contact fields component — all mandatory
+  const ContactFields = ({
+    form, setF, showRole = false
+  }: {
+    form: typeof createForm | typeof editForm
+    setF: (f: any) => void
+    showRole?: boolean
+  }) => (
+    <>
+      <div className="grid grid-cols-2 gap-3">
+        <div>
+          <label className="label">Full Name *</label>
+          <input className="input" required value={form.full_name}
+            onChange={e => setF((f: any) => ({ ...f, full_name: e.target.value }))}
+            placeholder="e.g. John Lim" />
+        </div>
+        <div>
+          <label className="label">Email Address *</label>
+          <input className="input" required type="email" value={form.email}
+            onChange={e => setF((f: any) => ({ ...f, email: e.target.value }))}
+            placeholder="john@gym.com" />
+        </div>
+      </div>
+      <div>
+        <label className="label">Phone Number *</label>
+        <input className="input" required type="tel" value={form.phone}
+          onChange={e => setF((f: any) => ({ ...f, phone: e.target.value }))}
+          placeholder="+65 9123 4567" />
+        <p className="text-xs text-gray-400 mt-1">Required for WhatsApp session reminders</p>
+      </div>
+    </>
   )
 
   return (
@@ -264,47 +273,36 @@ export default function TrainersPage() {
             <form onSubmit={handleCreate} className="card p-4 space-y-4 border-green-200">
               <div className="flex items-center justify-between">
                 <h2 className="font-semibold text-gray-900 text-sm">Add New Staff Member</h2>
-                <button type="button" onClick={() => { setShowCreateForm(false); resetCreateForm() }}>
+                <button type="button" onClick={() => { setShowCreateForm(false); setCreateForm({ ...emptyCreate }) }}>
                   <X className="w-4 h-4 text-gray-400" />
                 </button>
               </div>
 
-              <div className="grid grid-cols-2 gap-2">
-                {ALL_ROLES.map(r => (
-                  <label key={r.value}
-                    className={cn('flex items-start gap-2 p-2.5 rounded-lg border cursor-pointer transition-colors',
-                      createForm.role === r.value ? 'border-green-500 bg-green-50' : 'border-gray-200 hover:border-gray-300')}>
-                    <input type="radio" name="create_role" value={r.value}
-                      checked={createForm.role === r.value}
-                      onChange={e => setCreateForm(f => ({ ...f, role: e.target.value, is_also_trainer: false, phone: '' }))}
-                      className="mt-0.5 flex-shrink-0" />
-                    <div>
-                      <p className="text-xs font-medium text-gray-900">{r.label}</p>
-                      <p className="text-xs text-gray-400">{r.description}</p>
-                    </div>
-                  </label>
-                ))}
-              </div>
-
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="label">Full Name *</label>
-                  <input className="input" required value={createForm.full_name}
-                    onChange={e => setCreateForm(f => ({ ...f, full_name: e.target.value }))} placeholder="e.g. John Lim" />
-                </div>
-                <div>
-                  <label className="label">Email *</label>
-                  <input className="input" required type="email" value={createForm.email}
-                    onChange={e => setCreateForm(f => ({ ...f, email: e.target.value }))} placeholder="john@gym.com" />
+              {/* Role selector */}
+              <div>
+                <label className="label">Role *</label>
+                <div className="grid grid-cols-2 gap-2">
+                  {ALL_ROLES.map(r => (
+                    <label key={r.value}
+                      className={cn('flex items-start gap-2 p-2.5 rounded-lg border cursor-pointer transition-colors',
+                        createForm.role === r.value ? 'border-green-500 bg-green-50' : 'border-gray-200 hover:border-gray-300')}>
+                      <input type="radio" name="create_role" value={r.value}
+                        checked={createForm.role === r.value}
+                        onChange={e => setCreateForm(f => ({ ...f, role: e.target.value, is_also_trainer: false }))}
+                        className="mt-0.5 flex-shrink-0" />
+                      <div>
+                        <p className="text-xs font-medium text-gray-900">{r.label}</p>
+                        <p className="text-xs text-gray-400">{r.description}</p>
+                      </div>
+                    </label>
+                  ))}
                 </div>
               </div>
 
-              <PhoneField
-                value={createForm.phone}
-                onChange={v => setCreateForm(f => ({ ...f, phone: v }))}
-                required={isPhoneRequired(createForm.role)}
-              />
+              {/* All contact fields mandatory */}
+              <ContactFields form={createForm} setF={setCreateForm} />
 
+              {/* Commission — trainer or manager-trainer */}
               {(createForm.role === 'trainer' || (createForm.role === 'manager' && createForm.is_also_trainer)) && (
                 <div className="grid grid-cols-2 gap-3">
                   <div>
@@ -322,6 +320,7 @@ export default function TrainersPage() {
                 </div>
               )}
 
+              {/* Trainer gym assignment */}
               {createForm.role === 'trainer' && (
                 <div>
                   <label className="label">Assign to Gym(s) *</label>
@@ -338,6 +337,7 @@ export default function TrainersPage() {
                 </div>
               )}
 
+              {/* Manager gym + also trainer */}
               {createForm.role === 'manager' && (
                 <>
                   <div>
@@ -353,11 +353,20 @@ export default function TrainersPage() {
                 </>
               )}
 
+              {(createForm.role === 'admin' || createForm.role === 'business_ops') && (
+                <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 text-xs text-blue-700">
+                  {createForm.role === 'admin'
+                    ? '🔒 Admin accounts belong to Gym Library — not assigned to any specific gym.'
+                    : '🔍 Business Ops accounts have read-only access to all gym clubs.'}
+                </div>
+              )}
+
               <div className="flex gap-2">
                 <button type="submit" disabled={saving} className="btn-primary flex-1 disabled:opacity-50">
                   {saving ? 'Creating...' : 'Create Account'}
                 </button>
-                <button type="button" onClick={() => { setShowCreateForm(false); resetCreateForm() }} className="btn-secondary">Cancel</button>
+                <button type="button" onClick={() => { setShowCreateForm(false); setCreateForm({ ...emptyCreate }) }}
+                  className="btn-secondary">Cancel</button>
               </div>
             </form>
           )}
@@ -375,25 +384,7 @@ export default function TrainersPage() {
                 </button>
               </div>
 
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="label">Full Name *</label>
-                  <input className="input" required value={editForm.full_name}
-                    onChange={e => setEditForm(f => ({ ...f, full_name: e.target.value }))} />
-                </div>
-                <div>
-                  <label className="label">Email *</label>
-                  <input className="input" required type="email" value={editForm.email}
-                    onChange={e => setEditForm(f => ({ ...f, email: e.target.value }))} />
-                  <p className="text-xs text-gray-400 mt-1">Changing updates their Google login</p>
-                </div>
-              </div>
-
-              <PhoneField
-                value={editForm.phone}
-                onChange={v => setEditForm(f => ({ ...f, phone: v }))}
-                required={isPhoneRequired(editForm.role)}
-              />
+              <ContactFields form={editForm} setF={setEditForm} />
 
               {!isSelf(editingUser) && (
                 <div className="grid grid-cols-2 gap-3">
@@ -510,7 +501,8 @@ export default function TrainersPage() {
             <div className="space-y-2">
               {filteredStaff.map(member => (
                 <div key={member.id}
-                  className={cn('card p-4', !member.is_active && 'opacity-70', isSelf(member) && 'border-green-200 bg-green-50/30')}>
+                  className={cn('card p-4', !member.is_active && 'opacity-70',
+                    isSelf(member) && 'border-green-200 bg-green-50/30')}>
                   <div className="flex items-start gap-3">
                     <div className="w-10 h-10 bg-green-100 rounded-full flex items-center justify-center flex-shrink-0">
                       <span className="text-green-700 font-semibold text-sm">{member.full_name.charAt(0)}</span>
@@ -527,9 +519,7 @@ export default function TrainersPage() {
                       <p className="text-xs text-gray-500 mt-0.5">{member.email}</p>
                       {member.phone
                         ? <p className="text-xs text-gray-400">{member.phone}</p>
-                        : PHONE_REQUIRED_ROLES.includes(member.role) && (
-                          <p className="text-xs text-amber-500">⚠ Phone not set</p>
-                        )
+                        : <p className="text-xs text-amber-500">⚠ Phone not set</p>
                       }
                       <div className="flex items-center gap-1 mt-1">
                         <Building2 className="w-3 h-3 text-gray-300 flex-shrink-0" />
