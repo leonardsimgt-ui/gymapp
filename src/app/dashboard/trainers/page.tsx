@@ -4,9 +4,9 @@ import { useEffect, useState } from 'react'
 import { createClient } from '@/lib/supabase-browser'
 import { User, Gym } from '@/types'
 import {
-  Plus, UserCheck, ToggleLeft, ToggleRight, Shield, Users,
-  Briefcase, Dumbbell, Edit2, Trash2, RotateCcw, X, Save,
-  CheckCircle, AlertCircle, Archive
+  Plus, UserCheck, Shield, Users, Briefcase, Dumbbell,
+  Edit2, Trash2, X, Save, CheckCircle, AlertCircle,
+  Archive, Building2, ToggleLeft, ToggleRight
 } from 'lucide-react'
 import { formatDateTime } from '@/lib/utils'
 import { cn } from '@/lib/utils'
@@ -27,8 +27,9 @@ const roleBadge: Record<string, string> = {
 
 interface StaffMember extends User {
   trainer_gyms?: { gym_id: string; gyms: { name: string } }[]
-  gyms?: { name: string }
+  manager_gym?: { name: string }
   archiver?: { full_name: string }
+  manager_gym_id?: string
 }
 
 export default function TrainersPage() {
@@ -40,7 +41,6 @@ export default function TrainersPage() {
   const [filterRole, setFilterRole] = useState('all')
   const [showCreateForm, setShowCreateForm] = useState(false)
   const [editingUser, setEditingUser] = useState<StaffMember | null>(null)
-  const [loading, setLoading] = useState(false)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
   const [success, setSuccess] = useState('')
@@ -52,7 +52,7 @@ export default function TrainersPage() {
   })
 
   const [editForm, setEditForm] = useState({
-    full_name: '', phone: '', role: '', is_active: true,
+    full_name: '', email: '', phone: '', role: '', is_active: true,
     commission_signup_pct: '10', commission_session_pct: '15',
     gym_ids: [] as string[], manager_gym_id: '',
   })
@@ -67,14 +67,18 @@ export default function TrainersPage() {
 
     const { data: activeStaff } = await supabase
       .from('users')
-      .select('*, trainer_gyms(gym_id, gyms(name)), gyms!users_manager_gym_id_fkey(name)')
+      .select(`
+        *,
+        trainer_gyms(gym_id, gyms(name)),
+        manager_gym:gyms!users_manager_gym_id_fkey(name)
+      `)
       .eq('is_archived', false)
       .order('role').order('full_name')
     setStaff(activeStaff || [])
 
     const { data: archivedStaff } = await supabase
       .from('users')
-      .select('*, trainer_gyms(gym_id, gyms(name)), gyms!users_manager_gym_id_fkey(name)')
+      .select(`*, trainer_gyms(gym_id, gyms(name)), manager_gym:gyms!users_manager_gym_id_fkey(name)`)
       .eq('is_archived', true)
       .order('archived_at', { ascending: false })
     setArchived(archivedStaff || [])
@@ -86,11 +90,9 @@ export default function TrainersPage() {
   useEffect(() => { loadData() }, [])
 
   const showSuccess = (msg: string) => {
-    setSuccess(msg)
-    setTimeout(() => setSuccess(''), 3000)
+    setSuccess(msg); setTimeout(() => setSuccess(''), 3000)
   }
 
-  // ── CREATE ──────────────────────────────────────────────────
   const handleCreate = async (e: React.FormEvent) => {
     e.preventDefault()
     setSaving(true); setError('')
@@ -100,27 +102,28 @@ export default function TrainersPage() {
       body: JSON.stringify(createForm),
     })
     const result = await res.json()
-    if (!res.ok) { setError(result.error || 'Failed'); setSaving(false); return }
+    if (!res.ok) { setError(result.error || 'Failed to create'); setSaving(false); return }
     await loadData()
     setShowCreateForm(false)
     resetCreateForm()
     setSaving(false)
-    showSuccess('Staff account created successfully')
+    showSuccess('Account created successfully')
   }
 
-  // ── EDIT ────────────────────────────────────────────────────
   const openEdit = (member: StaffMember) => {
     setEditingUser(member)
     setEditForm({
       full_name: member.full_name,
+      email: member.email,
       phone: member.phone || '',
       role: member.role,
       is_active: member.is_active,
       commission_signup_pct: member.commission_signup_pct?.toString() || '10',
       commission_session_pct: member.commission_session_pct?.toString() || '15',
       gym_ids: member.trainer_gyms?.map(tg => tg.gym_id) || [],
-      manager_gym_id: (member as any).manager_gym_id || '',
+      manager_gym_id: member.manager_gym_id || '',
     })
+    setShowCreateForm(false)
     setError('')
   }
 
@@ -138,25 +141,22 @@ export default function TrainersPage() {
     await loadData()
     setEditingUser(null)
     setSaving(false)
-    showSuccess('Staff profile updated')
+    showSuccess('Profile updated successfully')
   }
 
-  const handleResetLogin = async (member: StaffMember) => {
-    if (!confirm(`Send a login reset link to ${member.full_name} (${member.email})?`)) return
-    setSaving(true)
+  const handleResetLogin = async () => {
+    if (!editingUser) return
     const res = await fetch('/api/trainers', {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ userId: member.id, reset_login: true }),
+      body: JSON.stringify({ userId: editingUser.id, reset_login: true }),
     })
-    setSaving(false)
-    if (res.ok) showSuccess(`Login reset link sent to ${member.email}`)
+    if (res.ok) showSuccess(`Login reset link sent to ${editingUser.email}`)
     else setError('Failed to send reset link')
   }
 
-  // ── ARCHIVE ─────────────────────────────────────────────────
   const handleArchive = async (member: StaffMember) => {
-    if (!confirm(`Archive ${member.full_name}? Their account will be disabled and moved to the Archived tab.`)) return
+    if (!confirm(`Archive ${member.full_name}? Their account will be disabled.`)) return
     setSaving(true)
     const res = await fetch('/api/trainers', {
       method: 'DELETE',
@@ -176,15 +176,37 @@ export default function TrainersPage() {
     gym_ids: [], manager_gym_id: '',
   })
 
-  const toggleCreateGym = (gymId: string) => setCreateForm(f => ({
-    ...f, gym_ids: f.gym_ids.includes(gymId) ? f.gym_ids.filter(g => g !== gymId) : [...f.gym_ids, gymId]
-  }))
+  const toggleGym = (gymId: string, formType: 'create' | 'edit') => {
+    if (formType === 'create') {
+      setCreateForm(f => ({
+        ...f, gym_ids: f.gym_ids.includes(gymId)
+          ? f.gym_ids.filter(g => g !== gymId) : [...f.gym_ids, gymId]
+      }))
+    } else {
+      setEditForm(f => ({
+        ...f, gym_ids: f.gym_ids.includes(gymId)
+          ? f.gym_ids.filter(g => g !== gymId) : [...f.gym_ids, gymId]
+      }))
+    }
+  }
 
-  const toggleEditGym = (gymId: string) => setEditForm(f => ({
-    ...f, gym_ids: f.gym_ids.includes(gymId) ? f.gym_ids.filter(g => g !== gymId) : [...f.gym_ids, gymId]
-  }))
+  // Helper: get gym label for a staff member
+  const getGymLabel = (member: StaffMember): string => {
+    if (member.role === 'trainer') {
+      const names = member.trainer_gyms?.map(tg => (tg.gyms as any)?.name).filter(Boolean) || []
+      return names.length > 0 ? names.join(', ') : 'Unassigned'
+    }
+    if (member.role === 'manager') {
+      return (member.manager_gym as any)?.name || 'Unassigned'
+    }
+    if (member.role === 'admin') return 'Gym Library (All)'
+    if (member.role === 'business_ops') return 'All Gyms (View)'
+    return '—'
+  }
 
-  const filteredStaff = filterRole === 'all' ? staff : staff.filter(s => s.role === filterRole)
+  const filteredStaff = filterRole === 'all'
+    ? staff
+    : staff.filter(s => s.role === filterRole)
 
   const RoleBadge = ({ role }: { role: string }) => {
     const info = ALL_ROLES.find(r => r.value === role)
@@ -194,6 +216,8 @@ export default function TrainersPage() {
       </span>
     )
   }
+
+  const isSelf = (member: StaffMember) => member.id === currentUser?.id
 
   return (
     <div className="space-y-4 max-w-3xl">
@@ -210,7 +234,7 @@ export default function TrainersPage() {
         )}
       </div>
 
-      {/* Success / Error banners */}
+      {/* Banners */}
       {success && (
         <div className="flex items-center gap-2 bg-green-50 border border-green-200 rounded-lg p-3 text-sm text-green-700">
           <CheckCircle className="w-4 h-4 flex-shrink-0" /> {success}
@@ -237,7 +261,6 @@ export default function TrainersPage() {
         </button>
       </div>
 
-      {/* ── ACTIVE TAB ── */}
       {tab === 'active' && (
         <>
           {/* Create form */}
@@ -250,47 +273,40 @@ export default function TrainersPage() {
                 </button>
               </div>
 
-              {/* Role selector */}
-              <div>
-                <label className="label">Role *</label>
-                <div className="grid grid-cols-2 gap-2">
-                  {ALL_ROLES.map(r => (
-                    <label key={r.value}
-                      className={cn('flex items-start gap-2 p-2.5 rounded-lg border cursor-pointer transition-colors',
-                        createForm.role === r.value ? 'border-green-500 bg-green-50' : 'border-gray-200 hover:border-gray-300')}>
-                      <input type="radio" name="role" value={r.value}
-                        checked={createForm.role === r.value}
-                        onChange={e => setCreateForm(f => ({ ...f, role: e.target.value }))}
-                        className="mt-0.5 flex-shrink-0" />
-                      <div>
-                        <p className="text-xs font-medium text-gray-900">{r.label}</p>
-                        <p className="text-xs text-gray-400">{r.description}</p>
-                      </div>
-                    </label>
-                  ))}
-                </div>
+              <div className="grid grid-cols-2 gap-2">
+                {ALL_ROLES.map(r => (
+                  <label key={r.value}
+                    className={cn('flex items-start gap-2 p-2.5 rounded-lg border cursor-pointer transition-colors',
+                      createForm.role === r.value ? 'border-green-500 bg-green-50' : 'border-gray-200 hover:border-gray-300')}>
+                    <input type="radio" name="create_role" value={r.value}
+                      checked={createForm.role === r.value}
+                      onChange={e => setCreateForm(f => ({ ...f, role: e.target.value }))}
+                      className="mt-0.5 flex-shrink-0" />
+                    <div>
+                      <p className="text-xs font-medium text-gray-900">{r.label}</p>
+                      <p className="text-xs text-gray-400">{r.description}</p>
+                    </div>
+                  </label>
+                ))}
               </div>
 
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="label">Full Name *</label>
                   <input className="input" required value={createForm.full_name}
-                    onChange={e => setCreateForm(f => ({ ...f, full_name: e.target.value }))}
-                    placeholder="e.g. John Lim" />
+                    onChange={e => setCreateForm(f => ({ ...f, full_name: e.target.value }))} placeholder="e.g. John Lim" />
                 </div>
                 <div>
                   <label className="label">Email *</label>
                   <input className="input" required type="email" value={createForm.email}
-                    onChange={e => setCreateForm(f => ({ ...f, email: e.target.value }))}
-                    placeholder="john@gym.com" />
+                    onChange={e => setCreateForm(f => ({ ...f, email: e.target.value }))} placeholder="john@gym.com" />
                 </div>
               </div>
 
               <div>
                 <label className="label">Phone</label>
                 <input className="input" value={createForm.phone}
-                  onChange={e => setCreateForm(f => ({ ...f, phone: e.target.value }))}
-                  placeholder="+65 9123 4567" />
+                  onChange={e => setCreateForm(f => ({ ...f, phone: e.target.value }))} placeholder="+65 9123 4567" />
               </div>
 
               {createForm.role === 'trainer' && (
@@ -311,11 +327,11 @@ export default function TrainersPage() {
                   </div>
                   <div>
                     <label className="label">Assign to Gym(s) *</label>
-                    <div className="space-y-1.5 mt-1">
+                    <div className="space-y-1.5">
                       {gyms.map(g => (
                         <label key={g.id} className="flex items-center gap-2 cursor-pointer">
                           <input type="checkbox" checked={createForm.gym_ids.includes(g.id)}
-                            onChange={() => toggleCreateGym(g.id)}
+                            onChange={() => toggleGym(g.id, 'create')}
                             className="rounded border-gray-300 text-green-600" />
                           <span className="text-sm text-gray-700">{g.name}</span>
                         </label>
@@ -339,8 +355,8 @@ export default function TrainersPage() {
               {(createForm.role === 'admin' || createForm.role === 'business_ops') && (
                 <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 text-xs text-blue-700">
                   {createForm.role === 'admin'
-                    ? '🔒 Admin accounts belong to Gym Library — not assigned to any gym.'
-                    : '🔍 Business Ops accounts have read-only access to all gyms.'}
+                    ? '🔒 Admin accounts belong to Gym Library — not assigned to any specific gym.'
+                    : '🔍 Business Ops accounts have read-only access to all gym clubs.'}
                 </div>
               )}
 
@@ -348,8 +364,7 @@ export default function TrainersPage() {
                 <button type="submit" disabled={saving} className="btn-primary flex-1 disabled:opacity-50">
                   {saving ? 'Creating...' : 'Create Account'}
                 </button>
-                <button type="button" onClick={() => { setShowCreateForm(false); resetCreateForm() }}
-                  className="btn-secondary">Cancel</button>
+                <button type="button" onClick={() => { setShowCreateForm(false); resetCreateForm() }} className="btn-secondary">Cancel</button>
               </div>
             </form>
           )}
@@ -358,7 +373,12 @@ export default function TrainersPage() {
           {editingUser && (
             <form onSubmit={handleEdit} className="card p-4 space-y-4 border-blue-200">
               <div className="flex items-center justify-between">
-                <h2 className="font-semibold text-gray-900 text-sm">Edit: {editingUser.full_name}</h2>
+                <div>
+                  <h2 className="font-semibold text-gray-900 text-sm">Edit: {editingUser.full_name}</h2>
+                  {isSelf(editingUser) && (
+                    <p className="text-xs text-green-600 mt-0.5">This is your own account</p>
+                  )}
+                </div>
                 <button type="button" onClick={() => setEditingUser(null)}>
                   <X className="w-4 h-4 text-gray-400" />
                 </button>
@@ -371,31 +391,41 @@ export default function TrainersPage() {
                     onChange={e => setEditForm(f => ({ ...f, full_name: e.target.value }))} />
                 </div>
                 <div>
-                  <label className="label">Phone</label>
-                  <input className="input" value={editForm.phone}
-                    onChange={e => setEditForm(f => ({ ...f, phone: e.target.value }))} />
+                  <label className="label">Email Address *</label>
+                  <input className="input" required type="email" value={editForm.email}
+                    onChange={e => setEditForm(f => ({ ...f, email: e.target.value }))} />
+                  <p className="text-xs text-gray-400 mt-1">Changing email updates their Google login</p>
                 </div>
               </div>
 
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="label">Role</label>
-                  <select className="input" value={editForm.role}
-                    onChange={e => setEditForm(f => ({ ...f, role: e.target.value }))}>
-                    {ALL_ROLES.map(r => <option key={r.value} value={r.value}>{r.label}</option>)}
-                  </select>
-                </div>
-                <div>
-                  <label className="label">Status</label>
-                  <select className="input" value={editForm.is_active ? 'active' : 'inactive'}
-                    onChange={e => setEditForm(f => ({ ...f, is_active: e.target.value === 'active' }))}>
-                    <option value="active">Active</option>
-                    <option value="inactive">Inactive</option>
-                  </select>
-                </div>
+              <div>
+                <label className="label">Phone</label>
+                <input className="input" value={editForm.phone}
+                  onChange={e => setEditForm(f => ({ ...f, phone: e.target.value }))} placeholder="+65 9123 4567" />
               </div>
 
-              {editForm.role === 'trainer' && (
+              {/* Role and status — admin only, not for own account */}
+              {!isSelf(editingUser) && (
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="label">Role</label>
+                    <select className="input" value={editForm.role}
+                      onChange={e => setEditForm(f => ({ ...f, role: e.target.value }))}>
+                      {ALL_ROLES.map(r => <option key={r.value} value={r.value}>{r.label}</option>)}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="label">Status</label>
+                    <select className="input" value={editForm.is_active ? 'active' : 'inactive'}
+                      onChange={e => setEditForm(f => ({ ...f, is_active: e.target.value === 'active' }))}>
+                      <option value="active">Active</option>
+                      <option value="inactive">Inactive</option>
+                    </select>
+                  </div>
+                </div>
+              )}
+
+              {(editForm.role === 'trainer' || editingUser.role === 'trainer') && (
                 <>
                   <div className="grid grid-cols-2 gap-3">
                     <div>
@@ -411,23 +441,25 @@ export default function TrainersPage() {
                         onChange={e => setEditForm(f => ({ ...f, commission_session_pct: e.target.value }))} />
                     </div>
                   </div>
-                  <div>
-                    <label className="label">Gym Assignments</label>
-                    <div className="space-y-1.5 mt-1">
-                      {gyms.map(g => (
-                        <label key={g.id} className="flex items-center gap-2 cursor-pointer">
-                          <input type="checkbox" checked={editForm.gym_ids.includes(g.id)}
-                            onChange={() => toggleEditGym(g.id)}
-                            className="rounded border-gray-300 text-green-600" />
-                          <span className="text-sm text-gray-700">{g.name}</span>
-                        </label>
-                      ))}
+                  {!isSelf(editingUser) && (
+                    <div>
+                      <label className="label">Gym Assignments</label>
+                      <div className="space-y-1.5">
+                        {gyms.map(g => (
+                          <label key={g.id} className="flex items-center gap-2 cursor-pointer">
+                            <input type="checkbox" checked={editForm.gym_ids.includes(g.id)}
+                              onChange={() => toggleGym(g.id, 'edit')}
+                              className="rounded border-gray-300 text-green-600" />
+                            <span className="text-sm text-gray-700">{g.name}</span>
+                          </label>
+                        ))}
+                      </div>
                     </div>
-                  </div>
+                  )}
                 </>
               )}
 
-              {editForm.role === 'manager' && (
+              {editForm.role === 'manager' && !isSelf(editingUser) && (
                 <div>
                   <label className="label">Assigned Gym</label>
                   <select className="input" value={editForm.manager_gym_id}
@@ -439,19 +471,20 @@ export default function TrainersPage() {
               )}
 
               {/* Reset login */}
-              <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 flex items-center justify-between">
-                <div>
-                  <p className="text-xs font-medium text-amber-800">Reset Login</p>
-                  <p className="text-xs text-amber-600 mt-0.5">Send a sign-in reset link to {editingUser.email}</p>
+              {!isSelf(editingUser) && (
+                <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 flex items-center justify-between">
+                  <div>
+                    <p className="text-xs font-medium text-amber-800">Reset Login</p>
+                    <p className="text-xs text-amber-600 mt-0.5">Send a sign-in link to {editingUser.email}</p>
+                  </div>
+                  <button type="button" onClick={handleResetLogin}
+                    className="btn-secondary text-xs py-1.5">Send Reset</button>
                 </div>
-                <button type="button" onClick={() => handleResetLogin(editingUser)}
-                  className="btn-secondary text-xs py-1.5 flex items-center gap-1.5">
-                  <RotateCcw className="w-3.5 h-3.5" /> Send Reset
-                </button>
-              </div>
+              )}
 
               <div className="flex gap-2">
-                <button type="submit" disabled={saving} className="btn-primary flex-1 flex items-center justify-center gap-2 disabled:opacity-50">
+                <button type="submit" disabled={saving}
+                  className="btn-primary flex-1 flex items-center justify-center gap-2 disabled:opacity-50">
                   <Save className="w-4 h-4" /> {saving ? 'Saving...' : 'Save Changes'}
                 </button>
                 <button type="button" onClick={() => setEditingUser(null)} className="btn-secondary">Cancel</button>
@@ -476,7 +509,7 @@ export default function TrainersPage() {
             ))}
           </div>
 
-          {/* Active staff list */}
+          {/* Staff list */}
           {filteredStaff.length === 0 ? (
             <div className="card p-8 text-center">
               <UserCheck className="w-10 h-10 text-gray-300 mx-auto mb-3" />
@@ -485,7 +518,8 @@ export default function TrainersPage() {
           ) : (
             <div className="space-y-2">
               {filteredStaff.map(member => (
-                <div key={member.id} className={cn('card p-4', !member.is_active && 'opacity-70')}>
+                <div key={member.id} className={cn('card p-4', !member.is_active && 'opacity-70',
+                  isSelf(member) && 'border-green-200 bg-green-50/30')}>
                   <div className="flex items-start gap-3">
                     <div className="w-10 h-10 bg-green-100 rounded-full flex items-center justify-center flex-shrink-0">
                       <span className="text-green-700 font-semibold text-sm">{member.full_name.charAt(0)}</span>
@@ -493,6 +527,7 @@ export default function TrainersPage() {
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-2 flex-wrap">
                         <p className="font-semibold text-gray-900 text-sm">{member.full_name}</p>
+                        {isSelf(member) && <span className="text-xs text-green-600 font-medium">(You)</span>}
                         <RoleBadge role={member.role} />
                         <span className={member.is_active ? 'badge-active' : 'badge-inactive'}>
                           {member.is_active ? 'Active' : 'Inactive'}
@@ -500,38 +535,38 @@ export default function TrainersPage() {
                       </div>
                       <p className="text-xs text-gray-500 mt-0.5">{member.email}</p>
                       {member.phone && <p className="text-xs text-gray-400">{member.phone}</p>}
+
+                      {/* Gym outlet — visible to admin */}
+                      <div className="flex items-center gap-1 mt-1">
+                        <Building2 className="w-3 h-3 text-gray-300 flex-shrink-0" />
+                        <p className="text-xs text-gray-400">{getGymLabel(member)}</p>
+                      </div>
+
                       {member.role === 'trainer' && (
                         <p className="text-xs text-gray-400 mt-0.5">
                           Commission: {member.commission_signup_pct}% sign-up · {member.commission_session_pct}% session
-                          {member.trainer_gyms && member.trainer_gyms.length > 0 && (
-                            <> · {member.trainer_gyms.map(tg => tg.gyms?.name).filter(Boolean).join(', ')}</>
-                          )}
-                        </p>
-                      )}
-                      {member.role === 'manager' && (
-                        <p className="text-xs text-gray-400 mt-0.5">
-                          Gym: {(member as any).gyms?.name || 'Not assigned'}
                         </p>
                       )}
                       <p className="text-xs text-gray-300 mt-1">
                         Created: {formatDateTime(member.created_at)}
                       </p>
                     </div>
-                    {/* Actions — don't allow editing/archiving yourself */}
-                    {member.id !== currentUser?.id && (
-                      <div className="flex items-center gap-1 flex-shrink-0">
-                        <button onClick={() => { setShowCreateForm(false); openEdit(member) }}
-                          className="p-2 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
-                          title="Edit">
-                          <Edit2 className="w-4 h-4" />
-                        </button>
+
+                    {/* Edit + archive actions */}
+                    <div className="flex items-center gap-1 flex-shrink-0">
+                      <button onClick={() => openEdit(member)}
+                        className="p-2 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
+                        title="Edit">
+                        <Edit2 className="w-4 h-4" />
+                      </button>
+                      {!isSelf(member) && (
                         <button onClick={() => handleArchive(member)}
                           className="p-2 text-gray-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition-colors"
                           title="Archive">
                           <Trash2 className="w-4 h-4" />
                         </button>
-                      </div>
-                    )}
+                      )}
+                    </div>
                   </div>
                 </div>
               ))}
@@ -540,7 +575,7 @@ export default function TrainersPage() {
         </>
       )}
 
-      {/* ── ARCHIVED TAB ── */}
+      {/* Archived tab */}
       {tab === 'archived' && (
         <div className="space-y-2">
           {archived.length === 0 ? (
@@ -563,17 +598,17 @@ export default function TrainersPage() {
                     </div>
                     <p className="text-xs text-gray-500 mt-0.5">{member.email}</p>
                     {member.phone && <p className="text-xs text-gray-400">{member.phone}</p>}
-
-                    {/* Audit trail */}
+                    <div className="flex items-center gap-1 mt-1">
+                      <Building2 className="w-3 h-3 text-gray-300 flex-shrink-0" />
+                      <p className="text-xs text-gray-400">{getGymLabel(member)}</p>
+                    </div>
                     <div className="mt-2 pt-2 border-t border-gray-100 space-y-0.5">
                       <p className="text-xs text-gray-400">
-                        <span className="font-medium text-gray-500">Created:</span>{' '}
-                        {formatDateTime(member.created_at)}
+                        <span className="font-medium text-gray-500">Created:</span> {formatDateTime(member.created_at)}
                       </p>
                       {member.archived_at && (
                         <p className="text-xs text-red-400">
-                          <span className="font-medium text-red-500">Archived:</span>{' '}
-                          {formatDateTime(member.archived_at)}
+                          <span className="font-medium text-red-500">Archived:</span> {formatDateTime(member.archived_at)}
                         </p>
                       )}
                     </div>
