@@ -1,4 +1,4 @@
-export type UserRole = 'admin' | 'manager' | 'business_ops' | 'trainer'
+export type UserRole = 'admin' | 'manager' | 'business_ops' | 'trainer' | 'staff'
 export type EmploymentType = 'full_time' | 'part_time'
 export type ClientStatus = 'active' | 'inactive' | 'lost'
 export type PackageStatus = 'active' | 'completed' | 'expired' | 'cancelled'
