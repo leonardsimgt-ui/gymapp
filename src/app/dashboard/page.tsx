@@ -140,7 +140,7 @@ export default function DashboardPage() {
       </div>
       <div className="card p-4">
         <h2 className="font-semibold text-gray-900 text-sm mb-3">Quick Actions</h2>
-        {[{ href: '/dashboard/admin/gyms', l: 'Manage Gym Clubs', icon: Building2 }, { href: '/dashboard/admin/staff', l: 'Business Ops Staff', icon: Briefcase }, { href: '/dashboard/admin/settings', l: 'App Settings', icon: Settings }].map(({ href, l, icon: Icon }) => (
+        {[{ href: '/dashboard/admin/staff', l: 'Business Ops Staff', icon: Briefcase }, { href: '/dashboard/admin/settings', l: 'App Settings', icon: Settings }].map(({ href, l, icon: Icon }) => (
           <Link key={href} href={href} className="flex items-center gap-3 p-3 rounded-lg hover:bg-gray-50 transition-colors">
             <Icon className="w-4 h-4 text-red-600 flex-shrink-0" /><span className="text-sm text-gray-700 flex-1">{l}</span><ChevronRight className="w-4 h-4 text-gray-400" />
           </Link>
