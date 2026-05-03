@@ -181,13 +181,13 @@ export default function MyLeavePage() {
               <p className="text-xs text-amber-600 mt-1">Pending Approval</p>
             </div>
           )}
-          <div className={cn('rounded-xl p-3', pendingDays > 0 ? '' : 'col-span-2', balance < 3 ? 'bg-amber-50' : 'bg-green-50')}>
+          <div className={cn('rounded-xl p-3 col-span-2', balance < 3 ? 'bg-amber-50' : 'bg-green-50')}>
             <p className={cn('text-2xl font-bold', balance < 3 ? 'text-amber-700' : 'text-green-700')}>{balance}</p>
             <p className={cn('text-xs mt-1', balance < 3 ? 'text-amber-600' : 'text-green-600')}>Current Balance (approved only)</p>
           </div>
         </div>
         {pendingDays > 0 && (
-          <p className="text-xs text-amber-600 text-center">Available after pending approved: <strong>{entitlement - takenDays - pendingDays}</strong> days</p>
+          <p className="text-xs text-amber-600 text-center">Available after pending approved: <strong>{Math.max(0, entitlement - takenDays - pendingDays)}</strong> days</p>
         )}
         {entitlementNotSet && (
           <p className="text-xs text-red-600 text-center mt-2 font-medium">
