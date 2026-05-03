@@ -28,7 +28,9 @@ export default function MemberProfilePage() {
     template_id: '', total_price_sgd: '', notes: '',
     start_date: new Date().toISOString().split('T')[0],
     validity_days: '180',
+    secondary_member_id: '',
   })
+  const [allMembers, setAllMembers] = useState<any[]>([])
   const supabase = createClient()
   const { isActingAsTrainer } = useViewMode()
 
@@ -88,6 +90,13 @@ export default function MemberProfilePage() {
     const { data: templates } = await supabase.from('package_templates')
       .select('*').eq('is_archived', false).order('name')
     setPackageTemplates(templates || [])
+
+    // Load all members at this gym for secondary member selection
+    if (m?.gym_id) {
+      const { data: gymMembers } = await supabase.from('members')
+        .select('id, full_name').eq('gym_id', m.gym_id).neq('id', id as string).order('full_name')
+      setAllMembers(gymMembers || [])
+    }
   }
 
   useEffect(() => { load() }, [id])
@@ -153,6 +162,8 @@ export default function MemberProfilePage() {
       trainer_id: authUser!.id,
       selling_trainer_id: authUser!.id,
       gym_id: member?.gym_id,
+      is_shared: !!pkgForm.secondary_member_id,
+      secondary_member_id: pkgForm.secondary_member_id || null,
       package_name: template.name,
       total_sessions: template.total_sessions,
       sessions_used: 0,
@@ -414,6 +425,25 @@ export default function MemberProfilePage() {
               </div>
             </div>
 
+            {/* Shared package */}
+            <div>
+              <label className="label">Sharing Partner (optional)</label>
+              <select className="input" value={pkgForm.secondary_member_id}
+                onChange={e => setPkgForm(f => ({ ...f, secondary_member_id: e.target.value }))}>
+                <option value="">No sharing — individual package</option>
+                {allMembers.map(m => <option key={m.id} value={m.id}>{m.full_name}</option>)}
+              </select>
+              {pkgForm.secondary_member_id && (
+                <div className="mt-2 bg-blue-50 border border-blue-200 rounded-lg p-3 text-xs text-blue-700 space-y-1">
+                  <p className="font-medium">Shared package rules:</p>
+                  <p>· <strong>{member?.full_name}</strong> is the primary holder — sessions deducted from this pool</p>
+                  <p>· Either member can attend sessions</p>
+                  <p>· Each attended session counts as 2 deductions (one per person present)</p>
+                  <p>· Sessions are logged separately for each attending member</p>
+                </div>
+              )}
+            </div>
+
             {/* Commission preview */}
             {selectedTemplate && pkgForm.total_price_sgd && (
               <div className="bg-white rounded-lg border border-gray-200 p-3 text-xs space-y-1">
@@ -456,6 +486,9 @@ export default function MemberProfilePage() {
                     <div>
                       <p className="font-medium text-gray-900 text-sm">{pkg.package_name}</p>
                       <p className="text-xs text-gray-500">Trainer: {pkg.trainer?.full_name}</p>
+                      {pkg.is_shared && pkg.secondary_member_id && (
+                        <p className="text-xs text-blue-600">Shared package · 2 sessions deducted per joint session</p>
+                      )}
                       {pkg.selling_trainer?.full_name !== pkg.trainer?.full_name && (
                         <p className="text-xs text-gray-400">Sold by: {pkg.selling_trainer?.full_name}</p>
                       )}
