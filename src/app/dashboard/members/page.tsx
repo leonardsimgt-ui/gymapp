@@ -37,10 +37,9 @@ export default function MembersPage() {
         .order('full_name')
 
       // Scope by role/view
-      if (userData.role === 'manager' && userData.manager_gym_id) {
+      if ((userData.role === 'manager' || userData.role === 'staff') && userData.manager_gym_id) {
         q = q.eq('gym_id', userData.manager_gym_id)
       } else if (userData.role === 'trainer') {
-        // Trainer sees members they created (own PT clients)
         q = q.eq('created_by', authUser.id)
       } else if (isActingAsTrainer) {
         q = q.eq('created_by', authUser.id)
@@ -70,6 +69,7 @@ export default function MembersPage() {
   })
 
   const canAddMember = user?.role === 'manager' || user?.role === 'business_ops' || isActingAsTrainer || user?.role === 'trainer'
+  const isReadOnly = user?.role === 'staff'
 
   if (loading) return <div className="flex items-center justify-center h-48"><div className="animate-spin rounded-full h-6 w-6 border-b-2 border-red-600" /></div>
 
@@ -78,7 +78,7 @@ export default function MembersPage() {
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-xl font-bold text-gray-900">
-            {isActingAsTrainer || user?.role === 'trainer' ? 'My Members' : 'Members'}
+            {user?.role === 'staff' ? 'Member Lookup' : isActingAsTrainer || user?.role === 'trainer' ? 'My Members' : 'Members'}
           </h1>
           <p className="text-sm text-gray-500">{filtered.length} member{filtered.length !== 1 ? 's' : ''}</p>
         </div>
