@@ -43,7 +43,7 @@ export default function LeaveManagementPage() {
         .select('trainer_id').eq('gym_id', u.manager_gym_id)
       const trainerIds = gymTrainers?.map((t: any) => t.trainer_id) || []
       const managerIds = gymStaff?.map((s: any) => s.id) || []
-      staffIds = [...new Set([...managerIds, ...trainerIds])]
+      staffIds = Array.from(new Set([...managerIds, ...trainerIds]))
     } else if (u.role === 'business_ops') {
       // Biz ops approves managers
       const { data: managers } = await supabase.from('users').select('id').eq('role', 'manager')
