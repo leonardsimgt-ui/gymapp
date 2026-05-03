@@ -10,7 +10,7 @@ import {
   BarChart3, DollarSign, Settings, LogOut, Menu, ChevronRight,
   FileText, Banknote, X, Building2, UserCheck, Clock,
   Calculator, Briefcase, CreditCard, CalendarDays, Receipt,
-  TrendingUp, Layers
+  TrendingUp, Layers, UserMinus
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 
@@ -34,6 +34,8 @@ const bizOpsNav: NavItem[] = [
   { label: 'HR & Payroll', header: true },
   { href: '/dashboard/hr/staff', label: 'Staff Management', icon: Users },
   { href: '/dashboard/hr/roster', label: 'Duty Roster', icon: CalendarDays },
+  { href: '/dashboard/hr/leave', label: 'Leave Management', icon: CalendarDays },
+  { href: '/dashboard/pt/capacity', label: 'Trainer Capacity', icon: TrendingUp },
   { href: '/dashboard/payroll', label: 'Monthly Payroll', icon: Banknote },
   { href: '/dashboard/payroll/commission', label: 'Commission Payouts', icon: TrendingUp },
   { href: '/dashboard/payroll/cpf', label: 'CPF Configuration', icon: Calculator },
@@ -53,8 +55,11 @@ const managerNav: NavItem[] = [
   { label: 'Operations', header: true },
   { href: '/dashboard/hr/staff', label: 'My Trainers', icon: UserCheck },
   { href: '/dashboard/hr/roster', label: 'Duty Roster', icon: CalendarDays },
+  { href: '/dashboard/hr/leave', label: 'Leave Management', icon: CalendarDays },
+  { href: '/dashboard/pt/capacity', label: 'Trainer Capacity', icon: TrendingUp },
   { href: '/dashboard/reports', label: 'Reports', icon: BarChart3 },
   { href: '/dashboard/my/payslips', label: 'My Payslips', icon: Receipt },
+  { href: '/dashboard/my/leave', label: 'My Leave', icon: CalendarDays },
 ]
 
 const trainerViewNav: NavItem[] = [
@@ -62,6 +67,7 @@ const trainerViewNav: NavItem[] = [
   { href: '/dashboard/members', label: 'My Members', icon: Users },
   { href: '/dashboard/pt/sessions', label: 'My Sessions', icon: Calendar },
   { href: '/dashboard/my/payslips', label: 'My Payslips', icon: Receipt },
+  { href: '/dashboard/my/leave', label: 'My Leave', icon: CalendarDays },
 ]
 
 const pureTrainerNav: NavItem[] = [
@@ -70,12 +76,14 @@ const pureTrainerNav: NavItem[] = [
   { href: '/dashboard/pt/sessions', label: 'My Sessions', icon: Calendar },
   { href: '/dashboard/membership/sales', label: 'Log Membership Sale', icon: CreditCard },
   { href: '/dashboard/my/payslips', label: 'My Payslips', icon: Receipt },
+  { href: '/dashboard/my/leave', label: 'My Leave', icon: CalendarDays },
 ]
 
 const partTimerNav: NavItem[] = [
   { href: '/dashboard', label: 'Dashboard', icon: LayoutDashboard },
   { href: '/dashboard/membership/sales', label: 'Log Membership Sale', icon: CreditCard },
   { href: '/dashboard/my/payslips', label: 'My Payslips', icon: Receipt },
+  { href: '/dashboard/my/leave', label: 'My Leave', icon: CalendarDays },
 ]
 
 const VIEW_KEY = 'gymapp_view_mode'
