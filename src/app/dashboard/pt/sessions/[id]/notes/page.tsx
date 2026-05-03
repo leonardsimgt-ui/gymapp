@@ -6,6 +6,7 @@ import { createClient } from '@/lib/supabase-browser'
 import { useViewMode } from '@/lib/view-mode-context'
 import { formatDateTime } from '@/lib/utils'
 import { ArrowLeft, FileText, Lock, CheckCircle, AlertCircle, Save, Clock, RefreshCw, XCircle } from 'lucide-react'
+import { renderWhatsAppTemplate } from '@/lib/whatsapp'
 import Link from 'next/link'
 import { cn } from '@/lib/utils'
 
@@ -133,11 +134,18 @@ export default function PtSessionNotesPage() {
       const renewalNote = renewalStatus === 'not_renewing'
         ? ` Member has indicated they will NOT be renewing. Reason: ${finalReason()}`
         : renewalStatus === 'renewed' ? ' Member has renewed their package.' : ''
+      const noteMsg = await renderWhatsAppTemplate('manager_note_alert', {
+        manager_name: gymManager.full_name,
+        trainer_name: currentUser.full_name,
+        member_name: session.member?.full_name || '',
+        session_date: session.scheduled_at ? new Date(session.scheduled_at).toLocaleDateString('en-SG', { day: 'numeric', month: 'short', year: 'numeric' }) : '',
+        gym_name: session.gym?.name || '',
+      }, `PT session notes submitted by ${currentUser.full_name} for ${session.member?.full_name}. Please review and confirm.${renewalNote}`)
       await supabase.from('whatsapp_queue').insert({
         notification_type: 'manager_note_alert',
         recipient_phone: gymManager.phone,
         recipient_name: gymManager.full_name,
-        message: `PT session notes submitted by ${currentUser.full_name} for ${session.member?.full_name}. Please review and confirm.${renewalNote}`,
+        message: noteMsg + renewalNote,
         related_id: id,
         scheduled_for: new Date().toISOString(),
         status: 'pending',
