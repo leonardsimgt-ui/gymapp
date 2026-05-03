@@ -22,6 +22,7 @@ export default function StaffPayrollDetailPage() {
   const [payslips, setPayslips] = useState<any[]>([])
   const [rosterSummary, setRosterSummary] = useState<any[]>([])
   const [cpfRates, setCpfRates] = useState<any>(null)
+  const [payslipBranding, setPayslipBranding] = useState<{logoUrl: string|null, companyName: string, gymName: string}>({ logoUrl: null, companyName: 'Gym Operations', gymName: 'Gym Operations' })
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
@@ -37,6 +38,7 @@ export default function StaffPayrollDetailPage() {
   const [incrementForm, setIncrementForm] = useState({ change_amount: '', effective_from: '', change_type: 'increment', notes: '' })
   const [bonusForm, setBonusForm] = useState({ bonus_type: 'performance', amount: '', month: new Date().getMonth() + 1, year: new Date().getFullYear(), notes: '' })
   const [payslipForm, setPayslipForm] = useState({ month: new Date().getMonth() + 1, year: new Date().getFullYear(), notes: '' })
+  const [payslipPreview, setPayslipPreview] = useState<any>(null)
   const supabase = createClient()
 
   const showMsg = (msg: string) => { setSuccess(msg); setTimeout(() => setSuccess(''), 3000) }
@@ -100,9 +102,28 @@ export default function StaffPayrollDetailPage() {
       setRosterSummary(Object.values(grouped).sort((a, b) => b.year - a.year || b.month - a.month).slice(0, 3))
     }
 
-    // Load CPF age brackets (Q3 fix: use age-bracket rates not flat cpf_rates table)
+    // Load CPF age brackets
     const { data: brackets } = await supabase.from('cpf_age_brackets').select('*').order('age_from')
-    setCpfRates(brackets || [])  // repurpose cpfRates state to hold brackets array
+    setCpfRates(brackets || [])
+
+    // Issue 4: Load payslip branding from app_settings
+    const { data: settings } = await supabase.from('app_settings')
+      .select('payslip_logo_url, company_name').eq('id', 'global').single()
+    const logoUrl = (settings as any)?.payslip_logo_url || null
+    const companyName = (settings as any)?.company_name || 'Gym Operations'
+
+    // Gym name: biz_ops use company name; others use their assigned gym
+    let gymName = companyName
+    if (staffData?.role === 'business_ops') {
+      gymName = companyName
+    } else if (staffData?.manager_gym_id) {
+      const { data: gym } = await supabase.from('gyms').select('name').eq('id', staffData.manager_gym_id).single()
+      if (gym) gymName = gym.name
+    } else if (staffData?.role === 'trainer') {
+      const { data: tg } = await supabase.from('trainer_gyms').select('gyms(name)').eq('trainer_id', staffData.id).eq('is_primary', true).single()
+      if (tg && (tg as any).gyms) gymName = (tg as any).gyms.name
+    }
+    setPayslipBranding({ logoUrl, companyName, gymName })
     setLoading(false)
   }
 
@@ -142,6 +163,19 @@ export default function StaffPayrollDetailPage() {
     await loadData(); setSaving(false); setShowBonusForm(false)
     setBonusForm({ bonus_type: 'performance', amount: '', month: new Date().getMonth() + 1, year: new Date().getFullYear(), notes: '' })
     showMsg('Bonus recorded')
+  }
+
+  const computePayslipPreview = () => {
+    if (!payslipForm.month || !payslipForm.year) return null
+    const isPartTime = staff?.employment_type === 'part_time'
+    const basicSalary = isPartTime ? null : (payroll?.current_salary || 0)
+    const brackets = Array.isArray(cpfRates) ? cpfRates : []
+    const hasDob = !!staff?.date_of_birth
+    const rates = getBracketRates(brackets, staff?.date_of_birth || null)
+    const isCpf = payroll?.is_cpf_liable ?? (isPartTime ? false : true)
+    const bonusForMonth = bonuses.filter(b => b.month === payslipForm.month && b.year === payslipForm.year)
+    const bonusAmt = bonusForMonth.reduce((s: number, b: any) => s + (b.amount || 0), 0)
+    return { isPartTime, basicSalary, bonusAmt, isCpf, rates, hasDob, bonusForMonth }
   }
 
   const handleGeneratePayslip = async (e: React.FormEvent) => {
@@ -222,6 +256,13 @@ export default function StaffPayrollDetailPage() {
 
   const handlePayslipAction = async (payslipId: string, action: 'approved' | 'paid') => {
     const { data: { user: authUser } } = await supabase.auth.getUser()
+    // Guard: only approved payslips can be marked paid
+    if (action === 'paid') {
+      const slip = payslips.find(p => p.id === payslipId)
+      if (!slip || slip.status !== 'approved') {
+        setError('Only approved payslips can be marked as paid.'); return
+      }
+    }
     const update: any = { status: action }
     if (action === 'approved') { update.approved_by = authUser?.id; update.approved_at = new Date().toISOString() }
     if (action === 'paid') update.paid_at = new Date().toISOString()
@@ -234,13 +275,32 @@ export default function StaffPayrollDetailPage() {
     const { default: autoTable } = await import('jspdf-autotable')
     const doc = new jsPDF()
     const isPartTime = slip.employment_type === 'part_time'
+    const { logoUrl, companyName, gymName } = payslipBranding
+    let yPos = 22
 
-    doc.setFontSize(18); doc.text('PAYSLIP', 14, 20)
+    // Issue 4: Branding — logo + company/gym name
+    if (logoUrl) {
+      try {
+        const img = await fetch(logoUrl).then(r => r.blob()).then(b => new Promise<string>((res, rej) => {
+          const fr = new FileReader(); fr.onload = () => res(fr.result as string); fr.onerror = rej; fr.readAsDataURL(b)
+        }))
+        doc.addImage(img as string, 'PNG', 14, 10, 20, 20)
+        doc.setFontSize(18); doc.setFont('helvetica', 'bold')
+        doc.text('PAYSLIP', 38, 20)
+        yPos = 36
+      } catch { doc.setFontSize(18); doc.text('PAYSLIP', 14, 22); yPos = 30 }
+    } else {
+      doc.setFontSize(18); doc.text('PAYSLIP', 14, 22); yPos = 30
+    }
+
+    doc.setFont('helvetica', 'normal')
     doc.setFontSize(10); doc.setTextColor(100)
-    doc.text(`${getMonthName(slip.month)} ${slip.year}`, 14, 28)
+    doc.text(companyName, 14, yPos); yPos += 6
+    doc.text(gymName, 14, yPos); yPos += 6
+    doc.text(`${getMonthName(slip.month)} ${slip.year}`, 14, yPos); yPos += 10
     doc.setTextColor(0)
-    doc.text(`${staff?.full_name} · ${isPartTime ? 'Part-time' : 'Full-time'}`, 14, 36)
-    if (staff?.nric) doc.text(`NRIC: ${staff.nric}`, 14, 42)
+    doc.text(`${staff?.full_name} · ${isPartTime ? 'Part-time' : 'Full-time'}`, 14, yPos); yPos += 6
+    if (staff?.nric) { doc.text(`NRIC: ${staff.nric}`, 14, yPos); yPos += 6 }
 
     const rows: any[] = []
     if (isPartTime && slip.total_hours > 0) {
@@ -257,7 +317,7 @@ export default function StaffPayrollDetailPage() {
     rows.push(['Net Pay', formatSGD(slip.net_salary)])
 
     autoTable(doc, {
-      startY: 52, head: [['Description', 'Amount (SGD)']], body: rows,
+      startY: yPos + 2, head: [['Description', 'Amount (SGD)']], body: rows,
       headStyles: { fillColor: [220, 38, 38] },
       columnStyles: { 1: { halign: 'right', fontStyle: 'bold' } },
     })
@@ -447,14 +507,68 @@ export default function StaffPayrollDetailPage() {
               <div><label className="label">Month *</label><select className="input" value={payslipForm.month} onChange={e => setPayslipForm(f => ({ ...f, month: parseInt(e.target.value) }))}>{Array.from({ length: 12 }, (_, i) => <option key={i + 1} value={i + 1}>{getMonthName(i + 1)}</option>)}</select></div>
               <div><label className="label">Year *</label><input className="input" type="number" value={payslipForm.year} onChange={e => setPayslipForm(f => ({ ...f, year: parseInt(e.target.value) }))} /></div>
             </div>
-            {/* Bonus auto-pulled from Bonuses section for this month */}
-            {!isPartTime && (
-              <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 text-xs text-blue-700 space-y-1">
-                <p className="font-medium">Bonus auto-included</p>
-                <p>Any bonuses recorded under the Bonuses section for this month will be automatically included in the payslip.</p>
-              </div>
-            )}
-            {isPartTime && <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 text-xs text-blue-700">Payslip will be calculated from completed roster shifts for the selected month. Only shifts with status Completed are included.</div>}
+            {/* Issue 5+6: Live preview + DOB warning */}
+            {(() => {
+              const prev = computePayslipPreview()
+              if (!prev) return null
+              return (
+                <div className="space-y-2">
+                  {/* DOB warning */}
+                  {!prev.hasDob && prev.isCpf && (
+                    <div className="flex items-start gap-2 bg-amber-50 border border-amber-200 rounded-lg p-3 text-xs text-amber-700">
+                      <AlertCircle className="w-4 h-4 flex-shrink-0 mt-0.5" />
+                      <div>
+                        <p className="font-medium">Date of birth not set</p>
+                        <p className="mt-0.5">CPF rates will default to standard (20% / 17%). Please update this staff member's date of birth to apply the correct age-bracket rates.</p>
+                      </div>
+                    </div>
+                  )}
+                  {/* Preview panel */}
+                  {!prev.isPartTime && (
+                    <div className="bg-gray-50 border border-gray-200 rounded-lg p-3 text-xs space-y-1.5">
+                      <p className="font-semibold text-gray-800 text-sm">Payslip Preview</p>
+                      <div className="flex justify-between"><span className="text-gray-500">Basic Salary</span><span className="font-medium">{formatSGD(prev.basicSalary)}</span></div>
+                      {prev.bonusAmt > 0 && (
+                        <div className="flex justify-between text-green-700">
+                          <span>Bonus ({prev.bonusForMonth.map((b: any) => b.bonus_type).join(', ')})</span>
+                          <span className="font-medium">+ {formatSGD(prev.bonusAmt)}</span>
+                        </div>
+                      )}
+                      {prev.bonusAmt === 0 && (
+                        <div className="flex justify-between text-gray-400">
+                          <span>Bonus</span><span>None recorded for this month</span>
+                        </div>
+                      )}
+                      <div className="flex justify-between border-t border-gray-200 pt-1.5"><span className="text-gray-700">Gross</span><span className="font-semibold">{formatSGD((prev.basicSalary || 0) + prev.bonusAmt)}</span></div>
+                      {prev.isCpf && (
+                        <>
+                          <div className="flex justify-between text-blue-600">
+                            <span>Employee CPF ({prev.rates.employee_rate}%)</span>
+                            <span>- {formatSGD(((prev.basicSalary || 0) + prev.bonusAmt) * prev.rates.employee_rate / 100)}</span>
+                          </div>
+                          <div className="flex justify-between font-semibold border-t border-gray-200 pt-1.5">
+                            <span>Net Pay</span>
+                            <span>{formatSGD(((prev.basicSalary || 0) + prev.bonusAmt) * (1 - prev.rates.employee_rate / 100))}</span>
+                          </div>
+                          <div className="flex justify-between text-red-600 text-xs pt-0.5">
+                            <span>Employer CPF ({prev.rates.employer_rate}%)</span>
+                            <span>+ {formatSGD(((prev.basicSalary || 0) + prev.bonusAmt) * prev.rates.employer_rate / 100)}</span>
+                          </div>
+                        </>
+                      )}
+                      {!prev.isCpf && (
+                        <div className="flex justify-between font-semibold border-t border-gray-200 pt-1.5"><span>Net Pay</span><span>{formatSGD((prev.basicSalary || 0) + prev.bonusAmt)}</span></div>
+                      )}
+                    </div>
+                  )}
+                  {prev.isPartTime && (
+                    <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 text-xs text-blue-700">
+                      Payslip will be calculated from completed roster shifts for the selected month. Only shifts with status Completed are included.
+                    </div>
+                  )}
+                </div>
+              )
+            })()}
             <div><label className="label">Notes</label><input className="input" value={payslipForm.notes} onChange={e => setPayslipForm(f => ({ ...f, notes: e.target.value }))} /></div>
             <div className="flex gap-2"><button type="submit" disabled={saving} className="btn-primary flex-1">{saving ? 'Generating...' : 'Generate Payslip'}</button><button type="button" onClick={() => setShowPayslipForm(false)} className="btn-secondary">Cancel</button></div>
           </form>
