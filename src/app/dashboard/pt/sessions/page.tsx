@@ -143,7 +143,7 @@ export default function PtSessionsPage() {
     <div className="space-y-4">
       <div className="flex items-center justify-between flex-wrap gap-3">
         <div><h1 className="text-xl font-bold text-gray-900">PT Sessions</h1><p className="text-sm text-gray-500">{sessions.length} sessions</p></div>
-        {isTrainer && !user?.role !== 'staff' && <Link href="/dashboard/pt/sessions/new" className="btn-primary flex items-center gap-1.5"><Plus className="w-4 h-4" /> Schedule</Link>}
+        {isTrainer && user?.role !== 'staff' && <Link href="/dashboard/pt/sessions/new" className="btn-primary flex items-center gap-1.5"><Plus className="w-4 h-4" /> Schedule</Link>}
       </div>
 
       {isTrainer && (
