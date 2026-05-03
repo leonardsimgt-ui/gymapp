@@ -5,13 +5,134 @@ import { createClient } from '@/lib/supabase-browser'
 import { useViewMode } from '@/lib/view-mode-context'
 import { formatSGD, formatDateTime, formatDate } from '@/lib/utils'
 import {
-  Users, Building2, Settings, ChevronRight, CheckCircle,
+  Users, Building2, Settings, ChevronRight, CheckCircle, ChevronDown, ChevronUp,
   Clock, DollarSign, Briefcase, UserCheck, Dumbbell, Shield,
   CreditCard, Calendar, Package, AlertTriangle, AlertCircle,
   TrendingUp, UserX, Bell
 } from 'lucide-react'
 import Link from 'next/link'
 import { cn } from '@/lib/utils'
+
+
+// Per-gym breakdown for Business Ops dashboard
+function BizOpsGymBreakdown() {
+  const [gyms, setGyms] = useState<any[]>([])
+  const [expanded, setExpanded] = useState<string | null>(null)
+  const supabase = createClient()
+  const now = new Date()
+  const monthStart = new Date(now.getFullYear(), now.getMonth(), 1).toISOString()
+
+  useEffect(() => {
+    const load = async () => {
+      const { data: gymsData } = await supabase.from('gyms').select('id, name').eq('is_active', true).order('name')
+
+      const enriched = await Promise.all((gymsData || []).map(async (g: any) => {
+        const [
+          { count: members },
+          { data: memSales },
+          { data: sessions },
+          { data: payouts },
+        ] = await Promise.all([
+          supabase.from('members').select('id', { count: 'exact', head: true }).eq('gym_id', g.id),
+          supabase.from('gym_memberships').select('price_sgd, commission_sgd').eq('gym_id', g.id).eq('sale_status', 'confirmed').gte('created_at', monthStart),
+          supabase.from('sessions').select('session_commission_sgd').eq('gym_id', g.id).eq('status', 'completed').gte('marked_complete_at', monthStart),
+          supabase.from('commission_payouts').select('total_commission_sgd').eq('gym_id', g.id).in('status', ['approved', 'paid']).gte('generated_at', monthStart),
+        ])
+        return {
+          ...g,
+          members: members || 0,
+          membershipSalesCount: memSales?.length || 0,
+          membershipRevenue: memSales?.reduce((s: number, m: any) => s + (m.price_sgd || 0), 0) || 0,
+          sessionsCount: sessions?.length || 0,
+          commissionPayout: payouts?.reduce((s: number, p: any) => s + (p.total_commission_sgd || 0), 0) || 0,
+        }
+      }))
+      setGyms(enriched)
+    }
+    load()
+  }, [])
+
+  const totals = gyms.reduce((acc, g) => ({
+    members: acc.members + g.members,
+    membershipSalesCount: acc.membershipSalesCount + g.membershipSalesCount,
+    membershipRevenue: acc.membershipRevenue + g.membershipRevenue,
+    sessionsCount: acc.sessionsCount + g.sessionsCount,
+    commissionPayout: acc.commissionPayout + g.commissionPayout,
+  }), { members: 0, membershipSalesCount: 0, membershipRevenue: 0, sessionsCount: 0, commissionPayout: 0 })
+
+  if (gyms.length === 0) return null
+  const monthName = now.toLocaleString('default', { month: 'long' })
+
+  return (
+    <div className="card">
+      <div className="p-4 border-b border-gray-100">
+        <h2 className="font-semibold text-gray-900 text-sm flex items-center gap-2">
+          <Building2 className="w-4 h-4 text-red-600" /> {monthName} — All Gym Clubs
+        </h2>
+        <p className="text-xs text-gray-400 mt-0.5">Click a gym to expand details</p>
+      </div>
+
+      {/* Totals row */}
+      <div className="grid grid-cols-4 divide-x divide-gray-100 bg-gray-50 border-b border-gray-100">
+        {[
+          { label: 'Total Members', value: totals.members.toString() },
+          { label: 'Membership Sales', value: totals.membershipSalesCount.toString(), sub: formatSGD(totals.membershipRevenue) },
+          { label: 'PT Sessions', value: totals.sessionsCount.toString() },
+          { label: 'Commission Paid', value: formatSGD(totals.commissionPayout) },
+        ].map(({ label, value, sub }) => (
+          <div key={label} className="p-3 text-center">
+            <p className="text-sm font-bold text-gray-900">{value}</p>
+            {sub && <p className="text-xs text-gray-400">{sub}</p>}
+            <p className="text-xs text-gray-400 mt-0.5">{label}</p>
+          </div>
+        ))}
+      </div>
+
+      {/* Per-gym rows */}
+      <div className="divide-y divide-gray-100">
+        {gyms.map(g => (
+          <div key={g.id}>
+            <button onClick={() => setExpanded(expanded === g.id ? null : g.id)}
+              className="w-full flex items-center gap-3 p-4 hover:bg-gray-50 transition-colors text-left">
+              <Building2 className="w-4 h-4 text-red-600 flex-shrink-0" />
+              <p className="text-sm font-medium text-gray-900 flex-1">{g.name}</p>
+              <div className="flex items-center gap-4 text-xs text-gray-500">
+                <span>{g.members} members</span>
+                <span>{g.membershipSalesCount} sales</span>
+                <span>{g.sessionsCount} sessions</span>
+                <span className="font-medium text-green-700">{formatSGD(g.commissionPayout)}</span>
+              </div>
+              {expanded === g.id
+                ? <ChevronUp className="w-4 h-4 text-gray-400 flex-shrink-0" />
+                : <ChevronDown className="w-4 h-4 text-gray-400 flex-shrink-0" />}
+            </button>
+
+            {expanded === g.id && (
+              <div className="grid grid-cols-2 gap-3 px-4 pb-4 bg-gray-50">
+                <div className="stat-card">
+                  <p className="text-xs text-gray-500">Members</p>
+                  <p className="text-2xl font-bold">{g.members}</p>
+                </div>
+                <div className="stat-card">
+                  <p className="text-xs text-gray-500">PT Sessions</p>
+                  <p className="text-2xl font-bold">{g.sessionsCount}</p>
+                </div>
+                <div className="stat-card">
+                  <p className="text-xs text-gray-500">Membership Sales ({g.membershipSalesCount})</p>
+                  <p className="text-xl font-bold">{formatSGD(g.membershipRevenue)}</p>
+                </div>
+                <div className="stat-card">
+                  <p className="text-xs text-gray-500">Commission Payouts</p>
+                  <p className="text-xl font-bold text-green-700">{formatSGD(g.commissionPayout)}</p>
+                </div>
+              </div>
+            )}
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+}
 
 export default function DashboardPage() {
   const [user, setUser] = useState<any>(null)
@@ -109,7 +230,34 @@ export default function DashboardPage() {
       const commission = sessData?.reduce((s: number, r: any) => s + (r.session_commission_sgd || 0), 0) || 0
       const sessCount = sessData?.length || 0
 
-      setStats({ members: memberCount || 0, packages: pkgCount || 0, sessions: sessCount, commission })
+      // Per-gym breakdown for biz ops (loaded inline in component)
+      // Membership sales revenue + commission payout for manager/biz ops
+      let membershipRevenue = 0
+      let membershipSalesCount = 0
+      let totalCommissionPayout = 0
+
+      if (!isTrainer) {
+        // Confirmed membership sales this month
+        let memQ = supabase.from('gym_memberships')
+          .select('price_sgd, commission_sgd')
+          .eq('sale_status', 'confirmed')
+          .gte('created_at', monthStart)
+        if (gymId) memQ = memQ.eq('gym_id', gymId)
+        const { data: memSalesData } = await memQ
+        membershipRevenue = memSalesData?.reduce((s: number, m: any) => s + (m.price_sgd || 0), 0) || 0
+        membershipSalesCount = memSalesData?.length || 0
+
+        // Total commission payouts (approved + paid) for the month
+        let payoutQ = supabase.from('commission_payouts')
+          .select('total_commission_sgd')
+          .in('status', ['approved', 'paid'])
+          .gte('generated_at', monthStart)
+        if (gymId) payoutQ = payoutQ.eq('gym_id', gymId)
+        const { data: payoutData } = await payoutQ
+        totalCommissionPayout = payoutData?.reduce((s: number, p: any) => s + (p.total_commission_sgd || 0), 0) || 0
+      }
+
+      setStats({ members: memberCount || 0, packages: pkgCount || 0, sessions: sessCount, commission, membershipRevenue, membershipSalesCount, totalCommissionPayout })
 
       // ── Manager-only alerts ──────────────────────────────
       if (isManager && gymId) {
@@ -188,6 +336,7 @@ export default function DashboardPage() {
   const now = new Date()
   const todayStr = now.toLocaleDateString('en-SG', { weekday: 'long', day: 'numeric', month: 'long' })
   const isAdmin = user.role === 'admin'
+  const isBizOps = user.role === 'business_ops'
   const isManager = user.role === 'manager' && !isActingAsTrainer
   const isTrainer = user.role === 'trainer' || isActingAsTrainer
   const totalPending = pendingMemberships + pendingSessions
@@ -279,24 +428,56 @@ export default function DashboardPage() {
       )}
 
       {/* ── Stats row ── */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-        <div className="stat-card">
-          <div className="flex items-center justify-between"><p className="text-xs text-gray-500">{isTrainer ? 'My Members' : 'Members'}</p><Users className="w-4 h-4 text-red-600" /></div>
-          <p className="text-2xl font-bold">{stats.members}</p>
+      {isTrainer ? (
+        // Trainer: own stats
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+          <div className="stat-card">
+            <div className="flex items-center justify-between"><p className="text-xs text-gray-500">My Members</p><Users className="w-4 h-4 text-red-600" /></div>
+            <p className="text-2xl font-bold">{stats.members}</p>
+          </div>
+          <div className="stat-card">
+            <div className="flex items-center justify-between"><p className="text-xs text-gray-500">Active Packages</p><Package className="w-4 h-4 text-red-600" /></div>
+            <p className="text-2xl font-bold">{stats.packages}</p>
+          </div>
+          <div className="stat-card">
+            <div className="flex items-center justify-between"><p className="text-xs text-gray-500">Sessions This Month</p><CheckCircle className="w-4 h-4 text-green-600" /></div>
+            <p className="text-2xl font-bold">{stats.sessions}</p>
+          </div>
+          <div className="stat-card">
+            <div className="flex items-center justify-between"><p className="text-xs text-gray-500">My Commission</p><DollarSign className="w-4 h-4 text-red-600" /></div>
+            <p className="text-xl font-bold">{formatSGD(stats.commission)}</p>
+          </div>
         </div>
-        <div className="stat-card">
-          <div className="flex items-center justify-between"><p className="text-xs text-gray-500">Active Packages</p><Package className="w-4 h-4 text-red-600" /></div>
-          <p className="text-2xl font-bold">{stats.packages}</p>
+      ) : (
+        // Manager / Biz Ops: gym-wide stats
+        <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+          <div className="stat-card">
+            <div className="flex items-center justify-between"><p className="text-xs text-gray-500">Members</p><Users className="w-4 h-4 text-red-600" /></div>
+            <p className="text-2xl font-bold">{stats.members}</p>
+          </div>
+          <div className="stat-card">
+            <div className="flex items-center justify-between"><p className="text-xs text-gray-500">Sessions This Month</p><CheckCircle className="w-4 h-4 text-green-600" /></div>
+            <p className="text-2xl font-bold">{stats.sessions}</p>
+          </div>
+          <div className="stat-card">
+            <div className="flex items-center justify-between"><p className="text-xs text-gray-500">Membership Sales</p><CreditCard className="w-4 h-4 text-red-600" /></div>
+            <p className="text-2xl font-bold">{stats.membershipSalesCount ?? 0}</p>
+            {stats.membershipRevenue > 0 && <p className="text-xs text-gray-400 mt-1">{formatSGD(stats.membershipRevenue)}</p>}
+          </div>
+          <div className="stat-card">
+            <div className="flex items-center justify-between"><p className="text-xs text-gray-500">Active PT Packages</p><Package className="w-4 h-4 text-red-600" /></div>
+            <p className="text-2xl font-bold">{stats.packages}</p>
+          </div>
+          <div className="stat-card col-span-2">
+            <div className="flex items-center justify-between"><p className="text-xs text-gray-500">Commission Payouts This Month</p><DollarSign className="w-4 h-4 text-red-600" /></div>
+            <p className="text-xl font-bold">{formatSGD(stats.totalCommissionPayout ?? 0)}</p>
+            <p className="text-xs text-gray-400 mt-1">Approved + paid commission payouts</p>
+          </div>
         </div>
-        <div className="stat-card">
-          <div className="flex items-center justify-between"><p className="text-xs text-gray-500">Sessions This Month</p><CheckCircle className="w-4 h-4 text-green-600" /></div>
-          <p className="text-2xl font-bold">{stats.sessions}</p>
-        </div>
-        <div className="stat-card">
-          <div className="flex items-center justify-between"><p className="text-xs text-gray-500">Commission</p><DollarSign className="w-4 h-4 text-red-600" /></div>
-          <p className="text-xl font-bold">{formatSGD(stats.commission)}</p>
-        </div>
-      </div>
+      )}
+
+      {/* ── Biz Ops: per-gym breakdown ── */}
+      {isBizOps && <BizOpsGymBreakdown />}
 
       {/* ── Today's sessions ── */}
       <div className="card">
