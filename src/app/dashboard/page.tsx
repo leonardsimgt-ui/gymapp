@@ -426,7 +426,7 @@ export default function DashboardPage() {
         // At-risk: packages expired in last 30 days with no new active package
         const thirtyDaysAgo = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0]
         const { data: expiredPkgs } = await supabase.from('packages')
-          .select('member_id, member:members(full_name, phone), end_date_calculated')
+          .select('id, member_id, member:members(full_name, phone), end_date_calculated')
           .eq('gym_id', gymId).eq('status', 'expired')
           .gte('end_date_calculated', thirtyDaysAgo)
         // Filter out those who have a new active package
@@ -437,10 +437,21 @@ export default function DashboardPage() {
           const activeIds = new Set(activePkgs?.map((p: any) => p.member_id))
           const atRisk = expiredPkgs?.filter((p: any) => !activeIds.has(p.member_id))
             .reduce((acc: any[], p: any) => {
-              if (!acc.find(x => x.member_id === p.member_id)) acc.push(p)
+              if (!acc.find((x: any) => x.member_id === p.member_id)) acc.push(p)
               return acc
             }, []) || []
-          setAtRiskMembers(atRisk)
+
+          // Fetch non-renewal reason from last session notes for each at-risk member
+          const atRiskWithReason = await Promise.all(atRisk.map(async (p: any) => {
+            const { data: lastSession } = await supabase.from('sessions')
+              .select('renewal_status, non_renewal_reason')
+              .eq('package_id', p.id)
+              .not('renewal_status', 'is', null)
+              .order('scheduled_at', { ascending: false })
+              .limit(1).single()
+            return { ...p, renewal_status: lastSession?.renewal_status, non_renewal_reason: lastSession?.non_renewal_reason }
+          }))
+          setAtRiskMembers(atRiskWithReason)
         }
 
         // Pending leave approvals
@@ -718,11 +729,20 @@ export default function DashboardPage() {
               </div>
               <div className="divide-y divide-gray-100">
                 {atRiskMembers.map((m: any) => (
-                  <div key={m.member_id} className="flex items-center gap-3 p-3">
-                    <UserX className="w-4 h-4 text-gray-400 flex-shrink-0" />
+                  <div key={m.member_id} className="flex items-start gap-3 p-3">
+                    <UserX className="w-4 h-4 text-gray-400 flex-shrink-0 mt-0.5" />
                     <div className="flex-1 min-w-0">
                       <p className="text-sm font-medium text-gray-900">{m.member?.full_name}</p>
                       <p className="text-xs text-gray-500">{m.member?.phone} · expired {formatDate(m.end_date_calculated)}</p>
+                      {m.non_renewal_reason && (
+                        <p className="text-xs text-red-500 mt-0.5">Reason: {m.non_renewal_reason}</p>
+                      )}
+                      {m.renewal_status === 'undecided' && (
+                        <p className="text-xs text-amber-500 mt-0.5">Member was undecided — follow up needed</p>
+                      )}
+                      {!m.renewal_status && (
+                        <p className="text-xs text-gray-400 mt-0.5 italic">No renewal decision recorded</p>
+                      )}
                     </div>
                     <Link href={`/dashboard/members/${m.member_id}`} className="text-xs text-red-600 font-medium flex-shrink-0">View</Link>
                   </div>
