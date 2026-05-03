@@ -139,6 +139,7 @@ export default function LeaveManagementPage() {
     if (!rejectId || !rejectReason.trim()) return
     await supabase.from('leave_applications').update({
       status: 'rejected', rejection_reason: rejectReason,
+      rejected_at: new Date().toISOString(),
     }).eq('id', rejectId)
     // WhatsApp to applicant
     const app = applications.find(a => a.id === rejectId)
@@ -214,8 +215,9 @@ export default function LeaveManagementPage() {
                 </div>
                 <div className="text-right flex-shrink-0">
                   <p className={cn('text-sm font-bold', s.balance < 3 ? 'text-red-600' : 'text-gray-900')}>{s.balance} days left</p>
-                  <p className="text-xs text-gray-400">{s.taken} taken / {s.leave_entitlement_days} entitled</p>
+                  <p className="text-xs text-gray-400">{s.taken} taken / {s.leave_entitlement_days ?? '—'} entitled</p>
                   {s.pending > 0 && <p className="text-xs text-amber-500">{s.pending} days pending</p>}
+                  {!s.leave_entitlement_days && <p className="text-xs text-red-500">Entitlement not set</p>}
                 </div>
               </div>
             ))}
