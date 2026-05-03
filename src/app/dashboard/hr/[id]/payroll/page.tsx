@@ -36,10 +36,27 @@ export default function StaffPayrollDetailPage() {
   const [salaryForm, setSalaryForm] = useState({ current_salary: '', is_cpf_liable: 'true' })
   const [incrementForm, setIncrementForm] = useState({ change_amount: '', effective_from: '', change_type: 'increment', notes: '' })
   const [bonusForm, setBonusForm] = useState({ bonus_type: 'performance', amount: '', month: new Date().getMonth() + 1, year: new Date().getFullYear(), notes: '' })
-  const [payslipForm, setPayslipForm] = useState({ month: new Date().getMonth() + 1, year: new Date().getFullYear(), bonus_amount: '0', notes: '' })
+  const [payslipForm, setPayslipForm] = useState({ month: new Date().getMonth() + 1, year: new Date().getFullYear(), notes: '' })
   const supabase = createClient()
 
   const showMsg = (msg: string) => { setSuccess(msg); setTimeout(() => setSuccess(''), 3000) }
+
+  const getAge = (dob: string | null) => {
+    if (!dob) return null
+    const today = new Date(); const birth = new Date(dob)
+    let age = today.getFullYear() - birth.getFullYear()
+    if (today.getMonth() < birth.getMonth() || (today.getMonth() === birth.getMonth() && today.getDate() < birth.getDate())) age--
+    return age
+  }
+
+  const getBracketRates = (brackets: any[], dob: string | null) => {
+    const age = getAge(dob)
+    if (age === null) return { employee_rate: 20, employer_rate: 17 }
+    const bracket = brackets.find((b: any) => age >= b.age_from && (b.age_to === null || age <= b.age_to))
+    return bracket
+      ? { employee_rate: bracket.employee_rate, employer_rate: bracket.employer_rate }
+      : { employee_rate: 20, employer_rate: 17 }
+  }
 
   useEffect(() => { loadData() }, [id])
 
@@ -77,8 +94,9 @@ export default function StaffPayrollDetailPage() {
       setRosterSummary(Object.values(grouped).sort((a, b) => b.year - a.year || b.month - a.month).slice(0, 3))
     }
 
-    const { data: cpfData } = await supabase.from('cpf_rates').select('*').order('effective_from', { ascending: false }).limit(1)
-    setCpfRates(cpfData?.[0])
+    // Load CPF age brackets (Q3 fix: use age-bracket rates not flat cpf_rates table)
+    const { data: brackets } = await supabase.from('cpf_age_brackets').select('*').order('age_from')
+    setCpfRates(brackets || [])  // repurpose cpfRates state to hold brackets array
     setLoading(false)
   }
 
@@ -264,16 +282,36 @@ export default function StaffPayrollDetailPage() {
           <div className="p-4">
             <div className="grid grid-cols-3 gap-3 mb-4">
               <div className="bg-gray-50 rounded-lg p-3 text-center"><p className="text-xl font-bold text-gray-900">{formatSGD(payroll?.current_salary || 0)}</p><p className="text-xs text-gray-500 mt-1">Monthly Salary</p></div>
-              <div className="bg-blue-50 rounded-lg p-3 text-center"><p className="text-xl font-bold text-blue-700">{payroll?.is_cpf_liable ? `${cpfRates?.employee_rate || 20}%` : 'N/A'}</p><p className="text-xs text-blue-600 mt-1">Employee CPF</p></div>
-              <div className="bg-red-50 rounded-lg p-3 text-center"><p className="text-xl font-bold text-red-700">{payroll?.is_cpf_liable ? `${cpfRates?.employer_rate || 17}%` : 'N/A'}</p><p className="text-xs text-red-600 mt-1">Employer CPF</p></div>
+              <div className="bg-blue-50 rounded-lg p-3 text-center">
+                <p className="text-xl font-bold text-blue-700">
+                  {payroll?.is_cpf_liable
+                    ? `${getBracketRates(Array.isArray(cpfRates) ? cpfRates : [], staff?.date_of_birth || null).employee_rate}%`
+                    : 'N/A'}
+                </p>
+                <p className="text-xs text-blue-600 mt-1">Employee CPF</p>
+              </div>
+              <div className="bg-red-50 rounded-lg p-3 text-center">
+                <p className="text-xl font-bold text-red-700">
+                  {payroll?.is_cpf_liable
+                    ? `${getBracketRates(Array.isArray(cpfRates) ? cpfRates : [], staff?.date_of_birth || null).employer_rate}%`
+                    : 'N/A'}
+                </p>
+                <p className="text-xs text-red-600 mt-1">Employer CPF</p>
+              </div>
             </div>
             {payroll?.is_cpf_liable && payroll?.current_salary > 0 && (
               <div className="text-xs text-gray-500 bg-gray-50 rounded-lg p-3 space-y-1">
                 <div className="flex justify-between"><span>Gross Salary</span><span className="font-medium">{formatSGD(payroll.current_salary)}</span></div>
-                <div className="flex justify-between text-blue-600"><span>Employee CPF</span><span>- {formatSGD(payroll.current_salary * (cpfRates?.employee_rate || 20) / 100)}</span></div>
-                <div className="flex justify-between font-medium text-gray-900 border-t border-gray-200 pt-1"><span>Net Take-home</span><span>{formatSGD(payroll.current_salary * (1 - (cpfRates?.employee_rate || 20) / 100))}</span></div>
-                <div className="flex justify-between text-red-600 border-t border-gray-200 pt-1"><span>Employer CPF</span><span>+ {formatSGD(payroll.current_salary * (cpfRates?.employer_rate || 17) / 100)}</span></div>
-                <div className="flex justify-between font-medium text-gray-900"><span>Total employer cost</span><span>{formatSGD(payroll.current_salary * (1 + (cpfRates?.employer_rate || 17) / 100))}</span></div>
+                {(() => {
+                  const r = getBracketRates(Array.isArray(cpfRates) ? cpfRates : [], staff?.date_of_birth || null)
+                  const sal = payroll.current_salary
+                  return <>
+                    <div className="flex justify-between text-blue-600"><span>Employee CPF ({r.employee_rate}%)</span><span>- {formatSGD(sal * r.employee_rate / 100)}</span></div>
+                    <div className="flex justify-between font-medium text-gray-900 border-t border-gray-200 pt-1"><span>Net Take-home</span><span>{formatSGD(sal * (1 - r.employee_rate / 100))}</span></div>
+                    <div className="flex justify-between text-red-600 border-t border-gray-200 pt-1"><span>Employer CPF ({r.employer_rate}%)</span><span>+ {formatSGD(sal * r.employer_rate / 100)}</span></div>
+                    <div className="flex justify-between font-medium text-gray-900"><span>Total employer cost</span><span>{formatSGD(sal * (1 + r.employer_rate / 100))}</span></div>
+                  </>
+                })()}
               </div>
             )}
           </div>
@@ -369,7 +407,13 @@ export default function StaffPayrollDetailPage() {
               <div><label className="label">Month *</label><select className="input" value={payslipForm.month} onChange={e => setPayslipForm(f => ({ ...f, month: parseInt(e.target.value) }))}>{Array.from({ length: 12 }, (_, i) => <option key={i + 1} value={i + 1}>{getMonthName(i + 1)}</option>)}</select></div>
               <div><label className="label">Year *</label><input className="input" type="number" value={payslipForm.year} onChange={e => setPayslipForm(f => ({ ...f, year: parseInt(e.target.value) }))} /></div>
             </div>
-            {!isPartTime && <div><label className="label">Bonus Amount (SGD)</label><input className="input" type="number" min="0" step="0.01" value={payslipForm.bonus_amount} onChange={e => setPayslipForm(f => ({ ...f, bonus_amount: e.target.value }))} /></div>}
+            {/* Bonus auto-pulled from Bonuses section for this month */}
+            {!isPartTime && (
+              <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 text-xs text-blue-700 space-y-1">
+                <p className="font-medium">Bonus auto-included</p>
+                <p>Any bonuses recorded under the Bonuses section for this month will be automatically included in the payslip.</p>
+              </div>
+            )}
             {isPartTime && <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 text-xs text-blue-700">Payslip will be calculated from locked roster shifts for the selected month.</div>}
             <div><label className="label">Notes</label><input className="input" value={payslipForm.notes} onChange={e => setPayslipForm(f => ({ ...f, notes: e.target.value }))} /></div>
             <div className="flex gap-2"><button type="submit" disabled={saving} className="btn-primary flex-1">{saving ? 'Generating...' : 'Generate Payslip'}</button><button type="button" onClick={() => setShowPayslipForm(false)} className="btn-secondary">Cancel</button></div>
