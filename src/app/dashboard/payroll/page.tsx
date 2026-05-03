@@ -35,11 +35,12 @@ export default function PayrollPage() {
     const { data: me } = await supabase.from('users').select('role').eq('id', authUser.id).single()
     if (!me || me.role !== 'business_ops') { router.replace('/dashboard'); return }
 
-    // Load all active staff with payroll profile
+    // Load all active staff with payroll profile — exclude admin (no payroll)
     const { data: staff } = await supabase
       .from('users')
       .select('*, staff_payroll(*)')
       .eq('is_archived', false)
+      .neq('role', 'admin')
       .order('employment_type').order('full_name')
     setStaffList(staff || [])
 
@@ -52,7 +53,7 @@ export default function PayrollPage() {
       .select('user_id, hours_worked, gross_pay, status')
       .gte('shift_date', monthStart)
       .lte('shift_date', monthEnd)
-      .neq('status', 'absent')
+      .eq('status', 'completed')
 
     const totals: Record<string, any> = {}
     rosterData?.forEach((r: any) => {
