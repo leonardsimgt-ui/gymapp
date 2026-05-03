@@ -104,6 +104,13 @@ export default function MyLeavePage() {
   const balance = entitlement - takenDays                  // approved-only balance
   const days = calcDays(form.start_date, form.end_date)
 
+  const recentDecisions = applications.filter(a => {
+    if (a.status === 'pending') return false
+    const decided = a.approved_at || a.updated_at
+    if (!decided) return false
+    return (Date.now() - new Date(decided).getTime()) < 7 * 24 * 60 * 60 * 1000
+  })
+
   const statusIcon = (s: string) => s === 'approved' ? <CheckCircle className="w-4 h-4 text-green-600" /> : s === 'pending' ? <Clock className="w-4 h-4 text-amber-500" /> : <XCircle className="w-4 h-4 text-red-500" />
 
   return (
@@ -115,9 +122,27 @@ export default function MyLeavePage() {
 
       {success && <div className="flex items-center gap-2 bg-green-50 border border-green-200 rounded-lg p-3 text-sm text-green-700"><CheckCircle className="w-4 h-4 flex-shrink-0" />{success}</div>}
 
+      {/* In-app indicator for recent decisions */}
+      {recentDecisions.filter(a => a.status === 'approved').length > 0 && (
+        <div className="flex items-center gap-2 bg-green-50 border border-green-200 rounded-lg p-3">
+          <CheckCircle className="w-4 h-4 text-green-600 flex-shrink-0" />
+          <p className="text-sm text-green-700 font-medium">
+            {recentDecisions.filter(a => a.status === 'approved').length} leave application{recentDecisions.filter(a => a.status === 'approved').length > 1 ? 's' : ''} approved recently
+          </p>
+        </div>
+      )}
+      {recentDecisions.filter(a => a.status === 'rejected').length > 0 && (
+        <div className="flex items-center gap-2 bg-red-50 border border-red-200 rounded-lg p-3">
+          <XCircle className="w-4 h-4 text-red-600 flex-shrink-0" />
+          <p className="text-sm text-red-700 font-medium">
+            {recentDecisions.filter(a => a.status === 'rejected').length} leave application{recentDecisions.filter(a => a.status === 'rejected').length > 1 ? 's' : ''} rejected — see below for reason
+          </p>
+        </div>
+      )}
+
       {/* Balance card */}
       <div className="card p-4">
-        <div className="grid grid-cols-2 gap-3 text-center">
+        <div className="grid grid-cols-2 gap-3 text-center" style={{gridTemplateColumns: "1fr 1fr"}}>
           <div className="bg-red-50 rounded-xl p-3">
             <p className="text-2xl font-bold text-red-700">{entitlement}</p>
             <p className="text-xs text-red-600 mt-1">Entitled</p>
@@ -126,15 +151,13 @@ export default function MyLeavePage() {
             <p className="text-2xl font-bold text-gray-700">{takenDays}</p>
             <p className="text-xs text-gray-500 mt-1">Approved & Taken</p>
           </div>
-          {pendingDays > 0 && (
-            <div className="bg-amber-50 rounded-xl p-3">
-              <p className="text-2xl font-bold text-amber-700">{pendingDays}</p>
-              <p className="text-xs text-amber-600 mt-1">Pending Approval</p>
-            </div>
-          )}
-          <div className={cn('rounded-xl p-3', pendingDays > 0 ? '' : 'col-span-2', balance < 3 ? 'bg-amber-50' : 'bg-green-50')}>
+          <div className="bg-amber-50 rounded-xl p-3">
+            <p className="text-2xl font-bold text-amber-700">{pendingDays}</p>
+            <p className="text-xs text-amber-600 mt-1">Pending Approval</p>
+          </div>
+          <div className={cn('rounded-xl p-3 col-span-2', balance < 3 ? 'bg-amber-50' : 'bg-green-50')}>
             <p className={cn('text-2xl font-bold', balance < 3 ? 'text-amber-700' : 'text-green-700')}>{balance}</p>
-            <p className={cn('text-xs mt-1', balance < 3 ? 'text-amber-600' : 'text-green-600')}>Current Balance</p>
+            <p className={cn('text-xs mt-1', balance < 3 ? 'text-amber-600' : 'text-green-600')}>Current Balance (approved only)</p>
           </div>
         </div>
         {pendingDays > 0 && (
