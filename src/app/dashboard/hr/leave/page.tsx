@@ -131,13 +131,14 @@ export default function LeaveManagementPage() {
           alert('Cannot approve — leave entitlement has not been set for this staff member. Please ask Business Operations to update their entitlement first.')
           return
         }
-        // Use available (entitlement - taken - pending) not just balance (entitlement - taken)
-        // This prevents approving leave when other pending applications would together exceed entitlement
-        const availableForApproval = staffBalance.available ?? staffBalance.balance
+        // Check: entitlement - taken - OTHER pending (excluding the app being approved)
+        // Do NOT include app.days_applied in pending — it would double-count
+        const otherPending = Math.max(0, staffBalance.pending - app.days_applied)
+        const availableForApproval = (staffBalance.leave_entitlement_days ?? 0) - staffBalance.taken - otherPending
         const remainingAfterApproval = availableForApproval - app.days_applied
         if (remainingAfterApproval < 0) {
-          const pendingNote = staffBalance.pending > 0
-            ? ` (includes ${staffBalance.pending} day${staffBalance.pending !== 1 ? 's' : ''} from other pending applications)`
+          const pendingNote = otherPending > 0
+            ? ` (${otherPending} day${otherPending !== 1 ? 's' : ''} already committed to other pending applications)`
             : ''
           alert(`Cannot approve — this would exceed the staff member's leave entitlement. They have ${availableForApproval} day${availableForApproval !== 1 ? 's' : ''} available${pendingNote}, but this application is for ${app.days_applied} day${app.days_applied !== 1 ? 's' : ''}.`)
           return
