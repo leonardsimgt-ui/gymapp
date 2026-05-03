@@ -151,7 +151,7 @@ export default function DashboardPage() {
           .eq('gym_id', gymId).eq('status', 'expired')
           .gte('end_date_calculated', thirtyDaysAgo)
         // Filter out those who have a new active package
-        const expiredMemberIds = [...new Set(expiredPkgs?.map((p: any) => p.member_id))]
+        const expiredMemberIds = Array.from(new Set(expiredPkgs?.map((p: any) => p.member_id)))
         if (expiredMemberIds.length > 0) {
           const { data: activePkgs } = await supabase.from('packages')
             .select('member_id').eq('gym_id', gymId).eq('status', 'active').in('member_id', expiredMemberIds)
