@@ -20,6 +20,7 @@ import { cn } from '@/lib/utils'
 function BizOpsDashboardAlerts() {
   const [pendingLeave, setPendingLeave] = useState(0)
   const [holidaysSetUp, setHolidaysSetUp] = useState(true)
+  const [cpfRatesSetUp, setCpfRatesSetUp] = useState(true)
   const supabase = createClient()
 
   useEffect(() => {
@@ -42,12 +43,19 @@ function BizOpsDashboardAlerts() {
         const { count } = await supabase.from('public_holidays')
           .select('id', { count: 'exact', head: true }).eq('year', nextYear)
         setHolidaysSetUp((count || 0) > 0)
+
+        // Check if CPF age bracket rates have been updated for next year
+        const nextYearDate = `${nextYear}-01-01`
+        const { count: cpfCount } = await supabase.from('cpf_age_brackets')
+          .select('id', { count: 'exact', head: true })
+          .gte('effective_from', nextYearDate)
+        setCpfRatesSetUp((cpfCount || 0) > 0)
       }
     }
     load()
   }, [])
 
-  if (pendingLeave === 0 && holidaysSetUp) return null
+  if (pendingLeave === 0 && holidaysSetUp && cpfRatesSetUp) return null
 
   return (
     <div className="space-y-3">
@@ -60,6 +68,20 @@ function BizOpsDashboardAlerts() {
             </p>
           </div>
           <Link href="/dashboard/hr/leave" className="btn-primary text-xs py-1.5 flex-shrink-0">Review</Link>
+        </div>
+      )}
+      {!cpfRatesSetUp && (
+        <div className="flex items-center gap-3 bg-amber-50 border border-amber-200 rounded-xl p-4">
+          <AlertCircle className="w-5 h-5 text-amber-600 flex-shrink-0" />
+          <div className="flex-1">
+            <p className="text-sm font-medium text-amber-800">
+              Action required — {new Date().getFullYear() + 1} CPF age bracket rates not yet configured
+            </p>
+            <p className="text-xs text-amber-600 mt-0.5">
+              Update CPF rates effective from 1 Jan {new Date().getFullYear() + 1} before processing payroll.
+            </p>
+          </div>
+          <Link href="/dashboard/payroll/cpf" className="btn-primary text-xs py-1.5 flex-shrink-0">Update</Link>
         </div>
       )}
       {!holidaysSetUp && (
