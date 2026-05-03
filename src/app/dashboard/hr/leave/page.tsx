@@ -167,7 +167,7 @@ export default function LeaveManagementPage() {
       <div>
         <h1 className="text-xl font-bold text-gray-900">Leave Management</h1>
         <p className="text-sm text-gray-500">
-          {user?.role === 'manager' && 'Approving leave for your gym's full-time trainers and operations staff'}
+          {user?.role === 'manager' && 'Approving leave for full-time trainers and operations staff at your gym'}
           {user?.role === 'business_ops' && 'Approving leave for gym managers'}
           {user?.role === 'admin' && 'Approving leave for Business Operations staff'}
         </p>
@@ -179,7 +179,7 @@ export default function LeaveManagementPage() {
       <div className="flex items-start gap-2 bg-blue-50 border border-blue-200 rounded-lg p-3 text-xs text-blue-700">
         <AlertCircle className="w-4 h-4 flex-shrink-0 mt-0.5" />
         <p>
-          {user?.role === 'manager' && 'You are reviewing leave from your gym's full-time trainers and operations staff. Approved leave will be deducted from their annual entitlement.'}
+          {user?.role === 'manager' && 'You are reviewing leave from full-time trainers and operations staff at your gym. Approved leave will be deducted from their annual entitlement.'}
           {user?.role === 'business_ops' && 'You are reviewing leave from gym managers across all gym clubs. Manager leave goes to you for approval.'}
           {user?.role === 'admin' && 'You are reviewing leave from Business Operations staff. Their leave escalates to you for approval.'}
         </p>
