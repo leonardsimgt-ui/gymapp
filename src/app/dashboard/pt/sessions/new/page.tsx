@@ -24,6 +24,8 @@ export default function NewPtSessionPage() {
     duration_minutes: '60',
     location: '',
     notes: '',
+    attending_member_id: '',  // for shared packages
+    secondary_member_attending: false,
   })
 
   const supabase = createClient()
@@ -82,10 +84,14 @@ export default function NewPtSessionPage() {
       setError('This package has expired'); setSaving(false); return
     }
 
-    const { error: err } = await supabase.from('sessions').insert({
+    const isPkgShared = (pkg as any)?.is_shared
+    const bothAttending = isPkgShared && form.secondary_member_attending
+
+    // For shared packages with both attending, insert 2 session records
+    const sessionPayload = {
       package_id: form.package_id,
       member_id: form.member_id,
-      client_id: form.member_id, // legacy
+      client_id: form.member_id,
       trainer_id: currentUser.id,
       gym_id: pkg?.gym_id,
       scheduled_at: scheduledAt.toISOString(),
@@ -93,7 +99,20 @@ export default function NewPtSessionPage() {
       location: form.location || null,
       status: 'scheduled',
       session_commission_pct: currentUser.commission_session_pct || 15,
-    })
+      attending_member_id: form.member_id,
+      is_secondary_member: false,
+    }
+
+    const { error: err } = await supabase.from('sessions').insert(sessionPayload)
+    if (!err && bothAttending && (pkg as any)?.secondary_member_id) {
+      // Second record for secondary member
+      await supabase.from('sessions').insert({
+        ...sessionPayload,
+        attending_member_id: (pkg as any).secondary_member_id,
+        is_secondary_member: true,
+        session_commission_pct: 0, // commission only on primary session
+      })
+    }
 
     if (err) { setError(err.message); setSaving(false); return }
 
@@ -169,6 +188,7 @@ export default function NewPtSessionPage() {
           <div className="bg-red-50 border border-red-100 rounded-lg px-3 py-2 text-xs text-red-700">
             {selectedPkg.sessions_used}/{selectedPkg.total_sessions} sessions used
             {selectedPkg.end_date_calculated && ` · Valid until ${formatDate(selectedPkg.end_date_calculated)}`}
+            {(selectedPkg as any).is_shared && ' · Shared package (2 sessions per joint attendance)'}
           </div>
         )}
 
@@ -206,6 +226,19 @@ export default function NewPtSessionPage() {
           </div>
         </div>
 
+        {(selectedPkg as any)?.is_shared && (
+          <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 text-xs text-blue-700 space-y-1">
+            <p className="font-medium">Shared package — who is attending this session?</p>
+            <div className="flex gap-2 mt-2">
+              {[{ value: 'primary', label: 'Primary member only (1 session deducted)' }, { value: 'both', label: 'Both members (2 sessions deducted)' }].map(opt => (
+                <label key={opt.value} className={cn('flex-1 flex items-center gap-2 p-2 rounded-lg border cursor-pointer', form.secondary_member_attending === (opt.value === 'both') ? 'border-blue-500 bg-white' : 'border-blue-200')}>
+                  <input type="radio" checked={form.secondary_member_attending === (opt.value === 'both')} onChange={() => setForm(f => ({ ...f, secondary_member_attending: opt.value === 'both' }))} />
+                  <span>{opt.label}</span>
+                </label>
+              ))}
+            </div>
+          </div>
+        )}
         <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 text-xs text-blue-700 flex items-start gap-2">
           <Calendar className="w-4 h-4 flex-shrink-0 mt-0.5" />
           A WhatsApp reminder will be sent to you 24 hours before the session.
