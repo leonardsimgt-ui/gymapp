@@ -28,7 +28,7 @@ export default function MembershipSalesPage() {
     setUser(userData)
 
     let q = supabase.from('gym_memberships')
-      .select('*, member:members(full_name, phone, membership_number), sold_by:users!gym_memberships_sold_by_user_id_fkey(full_name), gym:gyms(name)')
+      .select('*, member:members(full_name, phone, membership_number), sold_by:users!gym_memberships_sold_by_user_id_fkey(full_name, role), gym:gyms(name)')
       .order('created_at', { ascending: false })
 
     if (userData.role === 'trainer' || (userData.role === 'manager' && userData.is_also_trainer)) {
@@ -57,7 +57,23 @@ export default function MembershipSalesPage() {
     setRejectId(null); setRejectReason(''); await load(); showMsg('Sale rejected')
   }
 
-  const canConfirm = user?.role === 'business_ops'
+  // Confirm logic:
+  // - If sold by a manager (including manager-trainer hybrid, role = 'manager') → only biz_ops can confirm
+  // - If sold by a trainer → manager or biz_ops can confirm
+  // - null/unknown sold_by role → default to biz_ops only (safe fallback)
+  const sellerIsManager = (sale: any) => {
+    const role = sale.sold_by?.role
+    // role = 'manager' covers both pure managers AND manager-trainer hybrids
+    // (manager-trainers have role='manager' with is_also_trainer=true in the DB)
+    return role === 'manager' || role === 'business_ops' || role === 'admin' || !role
+  }
+  const canConfirmSale = (sale: any) => {
+    if (sale.sale_status !== 'pending') return false
+    if (sellerIsManager(sale)) return user?.role === 'business_ops'
+    // Sold by a trainer — manager or biz_ops can confirm
+    return user?.role === 'manager' || user?.role === 'business_ops'
+  }
+  const canConfirmAny = sales.some(s => canConfirmSale(s))
   const pendingCount = sales.filter(s => s.sale_status === 'pending').length
   const confirmedTotal = sales.filter(s => s.sale_status === 'confirmed').reduce((sum, s) => sum + (s.commission_sgd || 0), 0)
 
@@ -92,7 +108,7 @@ export default function MembershipSalesPage() {
 
       {success && <div className="flex items-center gap-2 bg-green-50 border border-green-200 rounded-lg p-3 text-sm text-green-700"><CheckCircle className="w-4 h-4 flex-shrink-0" />{success}</div>}
 
-      {canConfirm && pendingCount > 0 && (
+      {canConfirmAny && pendingCount > 0 && (
         <div className="flex items-center gap-2 bg-amber-50 border border-amber-200 rounded-lg p-3 text-sm text-amber-700">
           <AlertCircle className="w-4 h-4 flex-shrink-0" />
           {pendingCount} sale{pendingCount > 1 ? 's' : ''} pending your confirmation.
@@ -140,7 +156,7 @@ export default function MembershipSalesPage() {
                   <p className="text-xs text-gray-400 mt-0.5">Sold by: {sale.sold_by?.full_name} · {sale.gym?.name}</p>
                   {sale.rejection_reason && <p className="text-xs text-red-500 mt-0.5">Rejected: {sale.rejection_reason}</p>}
                 </div>
-                {canConfirm && sale.sale_status === 'pending' && (
+                {canConfirmSale(sale) && (
                   <div className="flex items-center gap-1 flex-shrink-0">
                     <button onClick={() => handleConfirm(sale.id)} className="btn-primary text-xs py-1.5 flex items-center gap-1"><CheckCircle className="w-3.5 h-3.5" /> Confirm</button>
                     <button onClick={() => setRejectId(sale.id)} className="btn-secondary text-xs py-1.5 flex items-center gap-1"><XCircle className="w-3.5 h-3.5" /></button>
