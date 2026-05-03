@@ -100,7 +100,7 @@ export default function LoginPage() {
         </div>
 
         <h1 className="text-2xl font-bold text-gray-900 mb-1">{appName}</h1>
-        <p className="text-gray-500 text-sm mb-6">Trainer Management Platform</p>
+        <p className="text-gray-500 text-sm mb-6">Gym Operations Suite</p>
 
         {/* Timeout notice */}
         {timedOut && (
