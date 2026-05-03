@@ -126,7 +126,7 @@ export default function LeaveManagementPage() {
           notification_type: 'manager_note_alert',
           recipient_phone: applicant.phone,
           recipient_name: applicant.full_name,
-          message: `Your ${LEAVE_TYPES[app.leave_type] || app.leave_type} application from ${formatDate(app.start_date)} to ${formatDate(app.end_date)} (${app.days_applied} day${app.days_applied !== 1 ? 's' : ''}) has been APPROVED.`,
+          message: `Your ${LEAVE_TYPES[app.leave_type] || app.leave_type} from ${formatDate(app.start_date)} to ${formatDate(app.end_date)} (${app.days_applied} day${app.days_applied !== 1 ? 's' : ''}) has been APPROVED.`,
           scheduled_for: new Date().toISOString(),
           status: 'pending',
         })
@@ -150,7 +150,7 @@ export default function LeaveManagementPage() {
           notification_type: 'manager_note_alert',
           recipient_phone: applicant.phone,
           recipient_name: applicant.full_name,
-          message: `Your ${LEAVE_TYPES[app.leave_type] || app.leave_type} application from ${formatDate(app.start_date)} to ${formatDate(app.end_date)} has been REJECTED. Reason: ${rejectReason}`,
+          message: `Your ${LEAVE_TYPES[app.leave_type] || app.leave_type} from ${formatDate(app.start_date)} to ${formatDate(app.end_date)} has been REJECTED. Reason: ${rejectReason}`,
           scheduled_for: new Date().toISOString(),
           status: 'pending',
         })
