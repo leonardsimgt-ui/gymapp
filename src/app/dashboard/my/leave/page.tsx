@@ -176,7 +176,7 @@ export default function MyLeavePage() {
             <p className="text-xs text-gray-500 mt-1">Approved & Taken</p>
           </div>
           {pendingDays > 0 && (
-            <div className="bg-amber-50 rounded-xl p-3">
+            <div className="bg-amber-50 rounded-xl p-3 col-span-2">
               <p className="text-2xl font-bold text-amber-700">{pendingDays}</p>
               <p className="text-xs text-amber-600 mt-1">Pending Approval</p>
             </div>
