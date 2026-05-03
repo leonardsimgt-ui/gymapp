@@ -42,6 +42,7 @@ const bizOpsNav: NavItem[] = [
   { label: 'Reports', header: true },
   { href: '/dashboard/reports', label: 'Summary Reports', icon: BarChart3 },
   { href: '/dashboard/config/commission', label: 'Commission Rates', icon: DollarSign },
+  { href: '/dashboard/config/public-holidays', label: 'Public Holidays', icon: CalendarDays },
   { href: '/dashboard/my/payslips', label: 'My Payslips', icon: Receipt },
 ]
 
