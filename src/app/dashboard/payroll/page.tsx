@@ -18,7 +18,7 @@ export default function PayrollPage() {
   const [bulkMonth, setBulkMonth] = useState(new Date().getMonth() + 1)
   const [bulkYear, setBulkYear] = useState(new Date().getFullYear())
   const [bulkGenerating, setBulkGenerating] = useState(false)
-  const [bulkResult, setBulkResult] = useState<{generated: number, skipped: number} | null>(null)
+  const [bulkResult, setBulkResult] = useState<{generated: number, skipped: number, noSalary: string[], noShifts: string[]} | null>(null)
   const [showBulkForm, setShowBulkForm] = useState(false)
   const [cpfBrackets, setCpfBrackets] = useState<any[]>([])
   const supabase = createClient()
@@ -88,38 +88,68 @@ export default function PayrollPage() {
     const { data: { user: authUser } } = await supabase.auth.getUser()
     const monthStart = `${bulkYear}-${String(bulkMonth).padStart(2, '0')}-01`
     const monthEnd = new Date(bulkYear, bulkMonth, 0).toISOString().split('T')[0]
+    const allUserIds = staffList.map(m => m.id)
+
+    // Issue 5: Batch-load everything upfront before the loop
+    const [existingRes, rosterRes, bonusRes] = await Promise.all([
+      // Existing payslips for this month
+      supabase.from('payslips').select('user_id')
+        .in('user_id', allUserIds).eq('month', bulkMonth).eq('year', bulkYear),
+      // Completed roster shifts for all part-timers this month (Issue 2: completed only)
+      supabase.from('duty_roster').select('user_id, hours_worked, gross_pay')
+        .in('user_id', allUserIds)
+        .gte('shift_date', monthStart).lte('shift_date', monthEnd)
+        .eq('status', 'completed'),
+      // Bonuses for all staff this month
+      supabase.from('staff_bonuses').select('user_id, amount')
+        .in('user_id', allUserIds).eq('month', bulkMonth).eq('year', bulkYear),
+    ])
+
+    // Build lookup maps
+    const existingSet = new Set(existingRes.data?.map((p: any) => p.user_id) || [])
+    const rosterByUser: Record<string, {hours: number, pay: number}> = {}
+    rosterRes.data?.forEach((r: any) => {
+      if (!rosterByUser[r.user_id]) rosterByUser[r.user_id] = { hours: 0, pay: 0 }
+      rosterByUser[r.user_id].hours += r.hours_worked || 0
+      rosterByUser[r.user_id].pay += r.gross_pay || 0
+    })
+    const bonusByUser: Record<string, number> = {}
+    bonusRes.data?.forEach((b: any) => {
+      bonusByUser[b.user_id] = (bonusByUser[b.user_id] || 0) + (b.amount || 0)
+    })
 
     let generated = 0; let skipped = 0
+    const noSalaryNames: string[] = []
+    const noShiftNames: string[] = []
+    const toInsert: any[] = []
+
     for (const member of staffList) {
-      // Skip if payslip already exists for this month
-      const { data: existing } = await supabase.from('payslips')
-        .select('id').eq('user_id', member.id).eq('month', bulkMonth).eq('year', bulkYear).single()
-      if (existing) { skipped++; continue }
+      if (existingSet.has(member.id)) { skipped++; continue }
 
       const isPartTime = member.employment_type === 'part_time'
       let basicSalary = 0; let totalHours = 0
 
       if (isPartTime) {
-        const { data: roster } = await supabase.from('duty_roster')
-          .select('hours_worked, gross_pay').eq('user_id', member.id)
-          .gte('shift_date', monthStart).lte('shift_date', monthEnd).eq('status', 'completed')
-        basicSalary = roster?.reduce((s: number, r: any) => s + (r.gross_pay || 0), 0) || 0
-        totalHours = roster?.reduce((s: number, r: any) => s + (r.hours_worked || 0), 0) || 0
-        if (basicSalary === 0) { skipped++; continue }
+        const r = rosterByUser[member.id]
+        basicSalary = r?.pay || 0
+        totalHours = r?.hours || 0
+        if (basicSalary === 0) { noShiftNames.push(member.full_name); skipped++; continue }
       } else {
         basicSalary = member.staff_payroll?.current_salary || 0
-        if (basicSalary === 0) { skipped++; continue }
+        if (basicSalary === 0) {
+          // Issue 4: warn with name instead of silently skipping
+          noSalaryNames.push(member.full_name); skipped++; continue
+        }
       }
 
-      // Pull bonuses recorded for this month
-      const { data: bonusData } = await supabase.from('staff_bonuses')
-        .select('amount').eq('user_id', member.id).eq('month', bulkMonth).eq('year', bulkYear)
-      const bonusAmt = bonusData?.reduce((s: number, b: any) => s + (b.amount || 0), 0) || 0
-
-      const isCpf = member.staff_payroll?.is_cpf_liable ?? true
+      const bonusAmt = bonusByUser[member.id] || 0
+      // Issue 6: part-timers default to not CPF liable
+      const isCpf = member.staff_payroll != null
+        ? !!member.staff_payroll.is_cpf_liable
+        : !isPartTime  // full_time defaults true, part_time defaults false
       const rates = getBracketRates(member.date_of_birth)
 
-      await supabase.from('payslips').upsert({
+      toInsert.push({
         user_id: member.id, month: bulkMonth, year: bulkYear,
         employment_type: member.employment_type || 'full_time',
         basic_salary: basicSalary, bonus_amount: bonusAmt,
@@ -129,10 +159,17 @@ export default function PayrollPage() {
         employee_cpf_rate: isCpf ? rates.employee_rate : 0,
         employer_cpf_rate: isCpf ? rates.employer_rate : 0,
         status: 'draft', generated_by: authUser?.id, generated_at: new Date().toISOString(),
-      }, { onConflict: 'user_id,month,year' })
+      })
       generated++
     }
-    setBulkResult({ generated, skipped }); setBulkGenerating(false)
+
+    // Issue 5: single batch insert instead of N individual upserts
+    if (toInsert.length > 0) {
+      await supabase.from('payslips').upsert(toInsert, { onConflict: 'user_id,month,year' })
+    }
+
+    setBulkResult({ generated, skipped, noSalary: noSalaryNames, noShifts: noShiftNames })
+    setBulkGenerating(false)
     load()
   }
 
@@ -205,9 +242,24 @@ export default function PayrollPage() {
               {bulkGenerating ? 'Generating payslips...' : `Generate All Payslips — ${['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][bulkMonth-1]} ${bulkYear}`}
             </button>
             {bulkResult && (
-              <div className="flex items-center gap-2 bg-green-50 border border-green-200 rounded-lg p-3 text-sm text-green-700">
-                <CheckCircle className="w-4 h-4 flex-shrink-0" />
-                {bulkResult.generated} payslip{bulkResult.generated !== 1 ? 's' : ''} generated · {bulkResult.skipped} skipped (already exist or no data)
+              <div className="space-y-2">
+                <div className="flex items-center gap-2 bg-green-50 border border-green-200 rounded-lg p-3 text-sm text-green-700">
+                  <CheckCircle className="w-4 h-4 flex-shrink-0" />
+                  {bulkResult.generated} payslip{bulkResult.generated !== 1 ? 's' : ''} generated · {bulkResult.skipped} skipped
+                </div>
+                {bulkResult.noSalary.length > 0 && (
+                  <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 text-xs text-amber-700">
+                    <p className="font-medium mb-1">⚠ Skipped — no salary set ({bulkResult.noSalary.length}):</p>
+                    <p>{bulkResult.noSalary.join(', ')}</p>
+                    <p className="mt-1 text-amber-600">Set their salary in the individual payroll profile, then regenerate.</p>
+                  </div>
+                )}
+                {bulkResult.noShifts.length > 0 && (
+                  <div className="bg-gray-50 border border-gray-200 rounded-lg p-3 text-xs text-gray-600">
+                    <p className="font-medium mb-1">Skipped — no completed shifts ({bulkResult.noShifts.length}):</p>
+                    <p>{bulkResult.noShifts.join(', ')}</p>
+                  </div>
+                )}
               </div>
             )}
           </div>
