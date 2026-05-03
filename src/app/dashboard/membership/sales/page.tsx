@@ -57,7 +57,7 @@ export default function MembershipSalesPage() {
     setRejectId(null); setRejectReason(''); await load(); showMsg('Sale rejected')
   }
 
-  const canConfirm = user?.role === 'manager' || user?.role === 'business_ops'
+  const canConfirm = user?.role === 'business_ops'
   const pendingCount = sales.filter(s => s.sale_status === 'pending').length
   const confirmedTotal = sales.filter(s => s.sale_status === 'confirmed').reduce((sum, s) => sum + (s.commission_sgd || 0), 0)
 
