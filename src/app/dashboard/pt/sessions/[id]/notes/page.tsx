@@ -1,0 +1,233 @@
+'use client'
+
+import { useEffect, useState } from 'react'
+import { useParams, useRouter } from 'next/navigation'
+import { createClient } from '@/lib/supabase-browser'
+import { useViewMode } from '@/lib/view-mode-context'
+import { formatDateTime, formatSGD } from '@/lib/utils'
+import { ArrowLeft, FileText, Lock, CheckCircle, AlertCircle, Save, Clock } from 'lucide-react'
+import Link from 'next/link'
+import { cn } from '@/lib/utils'
+
+const EDIT_WINDOW_MINUTES = 30
+
+export default function PtSessionNotesPage() {
+  const { id } = useParams()
+  const [session, setSession] = useState<any>(null)
+  const [currentUser, setCurrentUser] = useState<any>(null)
+  const [notes, setNotes] = useState('')
+  const [loading, setLoading] = useState(false)
+  const [saved, setSaved] = useState(false)
+  const [error, setError] = useState('')
+  const router = useRouter()
+  const supabase = createClient()
+  const { isActingAsTrainer } = useViewMode()
+
+  useEffect(() => {
+    const load = async () => {
+      const { data: { user: authUser } } = await supabase.auth.getUser()
+      if (!authUser) return
+      const { data: userData } = await supabase.from('users').select('*').eq('id', authUser.id).single()
+      setCurrentUser(userData)
+      const { data } = await supabase.from('sessions')
+        .select('*, member:members(full_name), package:packages(package_name), trainer:users!sessions_trainer_id_fkey(full_name, phone), gym:gyms(name)')
+        .eq('id', id).single()
+      setSession(data)
+      setNotes(data?.performance_notes || '')
+    }
+    load()
+  }, [id])
+
+  const isLocked = () => {
+    if (!session || !currentUser) return false
+    // Manager in manager view can always edit
+    if (currentUser.role === 'manager' && !isActingAsTrainer) return false
+    if (currentUser.role === 'business_ops') return false
+    // Trainer: locked after EDIT_WINDOW_MINUTES of submitting
+    if (session.notes_submitted_at) {
+      const elapsed = (Date.now() - new Date(session.notes_submitted_at).getTime()) / 1000 / 60
+      return elapsed > EDIT_WINDOW_MINUTES
+    }
+    return false
+  }
+
+  const handleTrainerSubmit = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!notes.trim() || notes.trim().length < 10) {
+      setError('Please enter at least 10 characters'); return
+    }
+    setLoading(true); setError('')
+    const { data: { user: authUser } } = await supabase.auth.getUser()
+
+    await supabase.from('sessions').update({
+      performance_notes: notes,
+      is_notes_complete: true,
+      notes_submitted_at: new Date().toISOString(),
+      session_commission_sgd: (session.session_commission_pct || 0) * (session.price_per_session_sgd || 0) / 100,
+    }).eq('id', id)
+
+    // Queue WhatsApp notification to manager
+    const { data: manager } = await supabase.from('users')
+      .select('phone, full_name').eq('id', session.gym?.manager_id || '').single()
+      .then(r => r) // won't fail if not found
+
+    // Find manager for this gym
+    const { data: gymManager } = await supabase.from('users')
+      .select('phone, full_name')
+      .eq('manager_gym_id', session.gym_id)
+      .eq('role', 'manager')
+      .single()
+
+    if (gymManager?.phone) {
+      await supabase.from('whatsapp_queue').insert({
+        notification_type: 'manager_note_alert',
+        recipient_phone: gymManager.phone,
+        recipient_name: gymManager.full_name,
+        message: `PT session notes submitted by ${currentUser.full_name} for ${session.member?.full_name}. Please review and confirm the session.`,
+        related_id: id,
+        scheduled_for: new Date().toISOString(),
+        status: 'pending',
+      })
+    }
+
+    setLoading(false); setSaved(true)
+    setTimeout(() => router.push('/dashboard/pt/sessions'), 1500)
+  }
+
+  const handleManagerSave = async (e: React.FormEvent) => {
+    e.preventDefault()
+    setLoading(true)
+    await supabase.from('sessions').update({ performance_notes: notes }).eq('id', id)
+    setLoading(false); setSaved(true)
+    setTimeout(() => router.push('/dashboard/pt/sessions'), 1500)
+  }
+
+  if (!session || !currentUser) return (
+    <div className="flex items-center justify-center h-48">
+      <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-red-600" />
+    </div>
+  )
+
+  const locked = isLocked()
+  const isManagerView = currentUser.role === 'manager' && !isActingAsTrainer
+  const isOwnSession = session.trainer_id === currentUser.id
+  const minutesRemaining = session.notes_submitted_at
+    ? Math.max(0, EDIT_WINDOW_MINUTES - (Date.now() - new Date(session.notes_submitted_at).getTime()) / 1000 / 60)
+    : EDIT_WINDOW_MINUTES
+
+  return (
+    <div className="max-w-lg mx-auto space-y-4">
+      <div className="flex items-center gap-3">
+        <Link href="/dashboard/pt/sessions" className="p-2 hover:bg-gray-100 rounded-lg">
+          <ArrowLeft className="w-4 h-4 text-gray-600" />
+        </Link>
+        <div>
+          <h1 className="text-xl font-bold text-gray-900">Session Notes</h1>
+          <p className="text-sm text-gray-500">
+            {session.member?.full_name} · {formatDateTime(session.scheduled_at)}
+          </p>
+        </div>
+      </div>
+
+      {/* Status banners */}
+      {locked && (
+        <div className="flex items-start gap-2 bg-gray-50 border border-gray-200 rounded-lg p-3">
+          <Lock className="w-4 h-4 text-gray-500 flex-shrink-0 mt-0.5" />
+          <div>
+            <p className="text-sm font-medium text-gray-700">Notes locked</p>
+            <p className="text-xs text-gray-500 mt-0.5">The {EDIT_WINDOW_MINUTES}-minute edit window has passed. Contact your manager to make changes.</p>
+          </div>
+        </div>
+      )}
+
+      {!locked && session.is_notes_complete && isOwnSession && !isManagerView && (
+        <div className="flex items-start gap-2 bg-green-50 border border-green-200 rounded-lg p-3">
+          <CheckCircle className="w-4 h-4 text-green-600 flex-shrink-0 mt-0.5" />
+          <div>
+            <p className="text-sm font-medium text-green-800">Notes submitted ✓</p>
+            <p className="text-xs text-green-600 mt-0.5">
+              {Math.ceil(minutesRemaining)} minute{Math.ceil(minutesRemaining) !== 1 ? 's' : ''} remaining to edit.
+              Awaiting manager confirmation.
+            </p>
+          </div>
+        </div>
+      )}
+
+      {!session.is_notes_complete && isOwnSession && !isManagerView && (
+        <div className="flex items-start gap-2 bg-amber-50 border border-amber-200 rounded-lg p-3">
+          <AlertCircle className="w-4 h-4 text-amber-600 flex-shrink-0 mt-0.5" />
+          <p className="text-sm text-amber-700">
+            Submit notes to qualify for session commission. You have {EDIT_WINDOW_MINUTES} minutes after submitting to make edits.
+          </p>
+        </div>
+      )}
+
+      {isManagerView && (
+        <div className="flex items-start gap-2 bg-blue-50 border border-blue-200 rounded-lg p-3">
+          <FileText className="w-4 h-4 text-blue-600 flex-shrink-0 mt-0.5" />
+          <p className="text-sm text-blue-700">Manager access — you can edit these notes at any time.</p>
+        </div>
+      )}
+
+      {session.manager_confirmed && (
+        <div className="flex items-center gap-2 bg-green-50 border border-green-200 rounded-lg p-3">
+          <CheckCircle className="w-4 h-4 text-green-600 flex-shrink-0" />
+          <p className="text-sm text-green-700 font-medium">Session confirmed by manager ✓</p>
+        </div>
+      )}
+
+      <form onSubmit={isManagerView ? handleManagerSave : handleTrainerSubmit} className="card p-4 space-y-4">
+        <div className="flex items-center gap-2 text-sm text-gray-600 bg-red-50 rounded-lg p-3">
+          <FileText className="w-4 h-4 text-red-600 flex-shrink-0" />
+          <span>{session.package?.package_name} · {session.gym?.name}</span>
+        </div>
+
+        <div>
+          <label className="label">Session Notes {!isManagerView && !locked && <span className="text-red-500">*</span>}</label>
+          <textarea
+            value={notes}
+            onChange={e => { setNotes(e.target.value); setError('') }}
+            className={cn('input min-h-[200px] resize-none', locked && !isManagerView && 'bg-gray-50 cursor-not-allowed')}
+            placeholder="Describe the session: exercises, weights/reps, member's performance, areas to improve, goals for next session..."
+            disabled={locked && !isManagerView}
+          />
+          {error && <p className="text-xs text-red-600 mt-1 flex items-center gap-1"><AlertCircle className="w-3 h-3" /> {error}</p>}
+          <p className="text-xs text-gray-400 mt-1">{notes.length} characters</p>
+        </div>
+
+        {saved ? (
+          <div className="bg-green-50 border border-green-200 rounded-lg p-3 text-sm text-green-700 text-center flex items-center justify-center gap-2">
+            <CheckCircle className="w-4 h-4" /> Saved! Redirecting...
+          </div>
+        ) : (
+          <>
+            {/* Trainer actions */}
+            {!isManagerView && !locked && (
+              <button type="submit" disabled={loading}
+                className="btn-primary w-full flex items-center justify-center gap-2 disabled:opacity-50">
+                <Save className="w-4 h-4" />
+                {loading ? 'Submitting...' : session.is_notes_complete
+                  ? `Save Edits (${Math.ceil(minutesRemaining)} min left)`
+                  : 'Submit Notes for Manager Confirmation'}
+              </button>
+            )}
+            {/* Manager actions */}
+            {isManagerView && (
+              <button type="submit" disabled={loading}
+                className="btn-primary w-full flex items-center justify-center gap-2 disabled:opacity-50">
+                <Save className="w-4 h-4" />
+                {loading ? 'Saving...' : 'Save Notes'}
+              </button>
+            )}
+            {/* Locked for trainer */}
+            {locked && !isManagerView && (
+              <p className="text-xs text-gray-400 text-center py-2">
+                Notes are locked. Contact your manager to make changes.
+              </p>
+            )}
+          </>
+        )}
+      </form>
+    </div>
+  )
+}
