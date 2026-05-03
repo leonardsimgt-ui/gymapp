@@ -11,6 +11,9 @@ export default function AdminSettingsPage() {
   const [sidebarLogoFile, setSidebarLogoFile] = useState<File | null>(null)
   const [sidebarLogoPreview, setSidebarLogoPreview] = useState<string | null>(null)
   const [autoLogoutMinutes, setAutoLogoutMinutes] = useState('10')
+  const [payslipLogoFile, setPayslipLogoFile] = useState<File | null>(null)
+  const [payslipLogoPreview, setPayslipLogoPreview] = useState<string | null>(null)
+  const [companyName, setCompanyName] = useState('Gym Operations Suite')
   const [saving, setSaving] = useState<string | null>(null)
   const [saved, setSaved] = useState<string | null>(null)
   const supabase = createClient()
@@ -25,6 +28,8 @@ export default function AdminSettingsPage() {
         setAutoLogoutMinutes(data.auto_logout_minutes?.toString() || '10')
         if (data.login_logo_url) setLoginLogoPreview(data.login_logo_url + '?t=' + Date.now())
         if (data.admin_sidebar_logo_url) setSidebarLogoPreview(data.admin_sidebar_logo_url + '?t=' + Date.now())
+        if ((data as any).payslip_logo_url) setPayslipLogoPreview((data as any).payslip_logo_url + '?t=' + Date.now())
+        if ((data as any).company_name) setCompanyName((data as any).company_name)
       }
     }
     load()
@@ -49,6 +54,11 @@ export default function AdminSettingsPage() {
       const url = await uploadLogo(sidebarLogoFile, 'app-logos', 'admin-sidebar-logo')
       if (url) { updates.admin_sidebar_logo_url = url.split('?')[0]; setSidebarLogoPreview(url) }
     }
+    if (payslipLogoFile) {
+      const url = await uploadLogo(payslipLogoFile, 'app-logos', 'payslip-logo')
+      if (url) { updates.payslip_logo_url = url.split('?')[0]; setPayslipLogoPreview(url) }
+    }
+    updates.company_name = companyName
     await supabase.from('app_settings').upsert(updates)
     setSaving(null); setSaved('branding'); setTimeout(() => setSaved(null), 3000)
   }
@@ -118,6 +128,15 @@ export default function AdminSettingsPage() {
         <LogoBox id="sidebar-logo" label="Admin Sidebar Logo" desc="Shown in the left panel when an admin is logged in"
           preview={sidebarLogoPreview}
           onChange={f => { setSidebarLogoFile(f); setSidebarLogoPreview(URL.createObjectURL(f)) }} />
+        <LogoBox id="payslip-logo" label="Payslip Logo" desc="Appears on the top-left of all staff payslips (recommended: square, min 200x200px)"
+          preview={payslipLogoPreview}
+          onChange={f => { setPayslipLogoFile(f); setPayslipLogoPreview(URL.createObjectURL(f)) }} />
+        <div>
+          <label className="label">Company / Gym Group Name on Payslips</label>
+          <input className="input" value={companyName} onChange={e => setCompanyName(e.target.value)}
+            placeholder="e.g. FitZone Holdings Pte Ltd" />
+          <p className="text-xs text-gray-400 mt-1">Printed as the issuer name on all payslips.</p>
+        </div>
         <SaveBtn k="branding" label="Save App Branding" onSave={handleSaveBranding} />
       </div>
 
