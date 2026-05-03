@@ -106,9 +106,13 @@ export default function LeaveManagementPage() {
       ...s,
       taken: takenByStaff[s.id] || 0,
       pending: pendingByStaff[s.id] || 0,
-      // If entitlement not set, show 0 balance to force escalation to Biz Ops to rectify
+      // balance = approved-only (shown as flag if negative — Issue 2)
       balance: s.leave_entitlement_days != null
         ? s.leave_entitlement_days - (takenByStaff[s.id] || 0)
+        : 0,
+      // available = entitlement minus approved AND pending (used for approval check — Issue 1)
+      available: s.leave_entitlement_days != null
+        ? s.leave_entitlement_days - (takenByStaff[s.id] || 0) - (pendingByStaff[s.id] || 0)
         : 0,
     })) || [])
 
@@ -127,9 +131,15 @@ export default function LeaveManagementPage() {
           alert('Cannot approve — leave entitlement has not been set for this staff member. Please ask Business Operations to update their entitlement first.')
           return
         }
-        const remainingAfterApproval = staffBalance.balance - app.days_applied
+        // Use available (entitlement - taken - pending) not just balance (entitlement - taken)
+        // This prevents approving leave when other pending applications would together exceed entitlement
+        const availableForApproval = staffBalance.available ?? staffBalance.balance
+        const remainingAfterApproval = availableForApproval - app.days_applied
         if (remainingAfterApproval < 0) {
-          alert(`Cannot approve — this would exceed the staff member's leave entitlement. They have ${staffBalance.balance} day${staffBalance.balance !== 1 ? 's' : ''} remaining but this application is for ${app.days_applied} day${app.days_applied !== 1 ? 's' : ''}.`)
+          const pendingNote = staffBalance.pending > 0
+            ? ` (includes ${staffBalance.pending} day${staffBalance.pending !== 1 ? 's' : ''} from other pending applications)`
+            : ''
+          alert(`Cannot approve — this would exceed the staff member's leave entitlement. They have ${availableForApproval} day${availableForApproval !== 1 ? 's' : ''} available${pendingNote}, but this application is for ${app.days_applied} day${app.days_applied !== 1 ? 's' : ''}.`)
           return
         }
       }
@@ -234,7 +244,9 @@ export default function LeaveManagementPage() {
                   <p className="text-xs text-gray-400 capitalize">{s.role}</p>
                 </div>
                 <div className="text-right flex-shrink-0">
-                  <p className={cn('text-sm font-bold', s.balance < 3 ? 'text-red-600' : 'text-gray-900')}>{s.balance} days left</p>
+                  <p className={cn('text-sm font-bold', s.balance < 0 ? 'text-red-700' : s.balance < 3 ? 'text-red-600' : 'text-gray-900')}>
+                    {s.balance < 0 ? `${s.balance} days (over-taken)` : `${s.balance} days left`}
+                  </p>
                   <p className="text-xs text-gray-400">
                     {s.taken} taken / {s.leave_entitlement_days != null ? s.leave_entitlement_days : '0 (not set)'} entitled
                   </p>
