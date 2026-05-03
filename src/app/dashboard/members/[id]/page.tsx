@@ -35,7 +35,7 @@ export default function MemberProfilePage() {
     if (m) setEditForm({ full_name: m.full_name, phone: m.phone, email: m.email || '', date_of_birth: m.date_of_birth || '', gender: m.gender || '', health_notes: m.health_notes || '', membership_number: m.membership_number || '' })
 
     const { data: mems } = await supabase.from('gym_memberships')
-      .select('*, sold_by:users!gym_memberships_sold_by_user_id_fkey(full_name), confirmed_by_user:users!gym_memberships_confirmed_by_fkey(full_name)')
+      .select('*, sold_by:users!gym_memberships_sold_by_user_id_fkey(full_name, role), confirmed_by_user:users!gym_memberships_confirmed_by_fkey(full_name)')
       .eq('member_id', id).order('created_at', { ascending: false })
     setMemberships(mems || [])
 
@@ -107,7 +107,22 @@ export default function MemberProfilePage() {
 
   const activeMembership = memberships.find(m => m.status === 'active' && m.sale_status === 'confirmed')
   const canManage = currentUser?.role === 'manager' || currentUser?.role === 'business_ops'
-  const canConfirmSale = currentUser?.role === 'business_ops'
+  // Confirm logic:
+  // - If sold by a manager (including manager-trainer hybrid, role = 'manager') → only biz_ops can confirm
+  // - If sold by a trainer → manager or biz_ops can confirm
+  // - null/unknown sold_by role → default to biz_ops only (safe fallback)
+  const sellerIsManager = (sale: any) => {
+    const role = sale.sold_by?.role
+    // role = 'manager' covers both pure managers AND manager-trainer hybrids
+    // (manager-trainers have role='manager' with is_also_trainer=true in the DB)
+    return role === 'manager' || role === 'business_ops' || role === 'admin' || !role
+  }
+  const canConfirmSale = (sale: any) => {
+    if (sale.sale_status !== 'pending') return false
+    if (sellerIsManager(sale)) return currentUser?.role === 'business_ops'
+    // Sold by a trainer — manager or biz_ops can confirm
+    return currentUser?.role === 'manager' || currentUser?.role === 'business_ops'
+  }
   const canSellPT = (isActingAsTrainer || currentUser?.role === 'trainer') && !!activeMembership
 
   if (!member) return <div className="flex items-center justify-center h-48"><div className="animate-spin rounded-full h-6 w-6 border-b-2 border-red-600" /></div>
@@ -183,7 +198,7 @@ export default function MemberProfilePage() {
                     <p className="text-xs text-gray-400">Sold by: {m.sold_by?.full_name}</p>
                     {m.rejection_reason && <p className="text-xs text-red-500">Rejected: {m.rejection_reason}</p>}
                   </div>
-                  {canConfirmSale && m.sale_status === 'pending' && (
+                  {canConfirmSale(m) && (
                     <div className="flex gap-1">
                       <button onClick={() => handleConfirmSale(m.id)} className="btn-primary text-xs py-1 px-2 flex items-center gap-1"><CheckCircle className="w-3 h-3" /> Confirm</button>
                       <button onClick={() => handleRejectSale(m.id)} className="btn-secondary text-xs py-1 px-2"><XCircle className="w-3 h-3" /></button>
