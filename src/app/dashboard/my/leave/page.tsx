@@ -106,7 +106,7 @@ export default function MyLeavePage() {
 
   const recentDecisions = applications.filter(a => {
     if (a.status === 'pending') return false
-    const decided = a.approved_at || a.updated_at
+    const decided = a.approved_at || a.rejected_at
     if (!decided) return false
     return (Date.now() - new Date(decided).getTime()) < 7 * 24 * 60 * 60 * 1000
   })
