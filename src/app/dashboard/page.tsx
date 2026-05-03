@@ -376,6 +376,14 @@ export default function DashboardPage() {
           managers: allStaff?.filter((s: any) => s.role === 'manager' && s.manager_gym_id === g.id).length || 0,
           trainers: allStaff?.filter((s: any) => s.role === 'trainer' && (s.trainer_gyms as any[])?.some((tg: any) => tg.gym_id === g.id)).length || 0,
         })))
+        // Pending Biz Ops leave awaiting admin approval
+        const bizOpsIds = allStaff?.filter((s: any) => s.role === 'business_ops').map((s: any) => s.id) || []
+        if (bizOpsIds.length > 0) {
+          const { count: leavePending } = await supabase.from('leave_applications')
+            .select('id', { count: 'exact', head: true })
+            .in('user_id', bizOpsIds).eq('status', 'pending')
+          setPendingLeave(leavePending || 0)
+        }
         setLoading(false)
         return
       }
@@ -578,7 +586,18 @@ export default function DashboardPage() {
         })}
       </div>
       <div className="card">
-        <div className="p-4 border-b border-gray-100"><h2 className="font-semibold text-gray-900 text-sm">Gym Clubs · Staff Breakdown</h2></div>
+        {pendingLeave > 0 && (
+        <div className="flex items-center gap-3 bg-blue-50 border border-blue-200 rounded-xl p-4">
+          <Calendar className="w-5 h-5 text-blue-600 flex-shrink-0" />
+          <div className="flex-1">
+            <p className="text-sm font-medium text-blue-800">
+              {pendingLeave} Business Ops leave application{pendingLeave > 1 ? 's' : ''} awaiting your approval
+            </p>
+          </div>
+          <Link href="/dashboard/hr/leave" className="btn-primary text-xs py-1.5 flex-shrink-0">Review</Link>
+        </div>
+      )}
+      <div className="p-4 border-b border-gray-100"><h2 className="font-semibold text-gray-900 text-sm">Gym Clubs · Staff Breakdown</h2></div>
         {gymBreakdown.map(gym => (
           <div key={gym.id} className={cn('p-4 border-b border-gray-100 last:border-0', !gym.is_active && 'opacity-50')}>
             <div className="flex items-center gap-3">
