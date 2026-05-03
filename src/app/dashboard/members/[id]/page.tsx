@@ -35,20 +35,20 @@ export default function MemberProfilePage() {
   // ── Auto-expire stale packages ────────────────────────────
   const expireStalePackages = async (packages: any[]) => {
     const today = new Date().toISOString().split('T')[0]
-    const updates: Promise<any>[] = []
+    const updates: PromiseLike<any>[] = []
 
     packages.forEach(pkg => {
       if (pkg.status !== 'active') return
       // Fully used up
       if (pkg.sessions_used >= pkg.total_sessions) {
         updates.push(
-          supabase.from('packages').update({ status: 'completed' }).eq('id', pkg.id).then()
+          Promise.resolve(supabase.from('packages').update({ status: 'completed' }).eq('id', pkg.id))
         )
       }
       // Past end date
       else if (pkg.end_date_calculated && pkg.end_date_calculated < today) {
         updates.push(
-          supabase.from('packages').update({ status: 'expired' }).eq('id', pkg.id).then()
+          Promise.resolve(supabase.from('packages').update({ status: 'expired' }).eq('id', pkg.id))
         )
       }
     })
@@ -147,9 +147,9 @@ export default function MemberProfilePage() {
     if (openPackages.length > 0) {
       const today = new Date().toISOString().split('T')[0]
       await Promise.all(openPackages.map(pkg =>
-        supabase.from('packages').update({
+        Promise.resolve(supabase.from('packages').update({
           status: pkg.sessions_used >= pkg.total_sessions ? 'completed' : 'expired',
-        }).eq('id', pkg.id).then()
+        }).eq('id', pkg.id))
       ))
     }
 
