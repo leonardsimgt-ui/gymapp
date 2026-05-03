@@ -36,6 +36,7 @@ export default function WhatsAppTemplatesPage() {
     placeholders: [{ key: '', label: '', description: '' }],
   })
   const textareaRef = useRef<HTMLTextAreaElement>(null)
+  const router = useRouter()
   const supabase = createClient()
 
   const showMsg = (msg: string) => { setSuccess(msg); setTimeout(() => setSuccess(''), 3000) }
@@ -43,6 +44,12 @@ export default function WhatsAppTemplatesPage() {
   useEffect(() => { load() }, [])
 
   const load = async () => {
+    // Route guard
+    const { data: { user: authUser } } = await supabase.auth.getUser()
+    if (!authUser) { router.replace('/dashboard'); return }
+    const { data: me } = await supabase.from('users').select('role').eq('id', authUser.id).single()
+    if (!me || (me.role !== 'business_ops')) { router.replace('/dashboard'); return }
+
     const { data } = await supabase.from('whatsapp_templates')
       .select('*').order('created_at')
     setTemplates(data || [])
