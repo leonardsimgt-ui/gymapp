@@ -35,20 +35,35 @@ export default function LeaveManagementPage() {
     // Get staff IDs this user can approve for
     let staffIds: string[] = []
     if (u.role === 'manager' && u.manager_gym_id) {
-      // Manager approves trainers in their gym
-      const { data: gymStaff } = await supabase.from('users')
-        .select('id').eq('manager_gym_id', u.manager_gym_id).neq('id', authUser.id).in('role', ['staff', 'manager'])
-      // Also trainers assigned to this gym
+      // Manager approves: full-time trainers + ops staff at their gym
+      // Part-timers do NOT apply for leave in this system
+      const { data: opsStaff } = await supabase.from('users')
+        .select('id').eq('manager_gym_id', u.manager_gym_id)
+        .eq('role', 'staff').neq('id', authUser.id)
       const { data: gymTrainers } = await supabase.from('trainer_gyms')
         .select('trainer_id').eq('gym_id', u.manager_gym_id)
-      // Exclude self — manager's own leave goes to Business Ops, not themselves
-      const trainerIds = (gymTrainers?.map((t: any) => t.trainer_id) || []).filter((id: string) => id !== authUser.id)
-      const managerIds = gymStaff?.map((s: any) => s.id) || []
-      staffIds = Array.from(new Set([...managerIds, ...trainerIds]))
+      // Full-time trainers only — filter out part-timers
+      const rawTrainerIds = (gymTrainers?.map((t: any) => t.trainer_id) || [])
+        .filter((id: string) => id !== authUser.id)
+      let ftTrainerIds: string[] = []
+      if (rawTrainerIds.length > 0) {
+        const { data: ftOnly } = await supabase.from('users')
+          .select('id').in('id', rawTrainerIds)
+          .eq('role', 'trainer').eq('employment_type', 'full_time')
+        ftTrainerIds = ftOnly?.map((t: any) => t.id) || []
+      }
+      const opsIds = opsStaff?.map((s: any) => s.id) || []
+      staffIds = Array.from(new Set([...opsIds, ...ftTrainerIds]))
     } else if (u.role === 'business_ops') {
-      // Biz ops approves managers
-      const { data: managers } = await supabase.from('users').select('id').eq('role', 'manager')
+      // Biz Ops approves managers' leave
+      const { data: managers } = await supabase.from('users')
+        .select('id').eq('role', 'manager')
       staffIds = managers?.map((m: any) => m.id) || []
+    } else if (u.role === 'admin') {
+      // Admin approves Business Ops leave
+      const { data: bizOps } = await supabase.from('users')
+        .select('id').eq('role', 'business_ops')
+      staffIds = bizOps?.map((b: any) => b.id) || []
     }
 
     if (staffIds.length === 0) { setLoading(false); return }
@@ -66,21 +81,32 @@ export default function LeaveManagementPage() {
       .select('id, full_name, role, leave_entitlement_days')
       .in('id', staffIds).eq('is_archived', false)
 
-    // Get approved leave days per staff
+    const currentYear = new Date().getFullYear()
+    // Approved leave days per staff
     const { data: approvedLeave } = await supabase.from('leave_applications')
       .select('user_id, days_applied')
       .in('user_id', staffIds).eq('status', 'approved')
-      .gte('start_date', `${new Date().getFullYear()}-01-01`)
+      .gte('start_date', `${currentYear}-01-01`)
+    // Pending leave days per staff
+    const { data: pendingLeave } = await supabase.from('leave_applications')
+      .select('user_id, days_applied')
+      .in('user_id', staffIds).eq('status', 'pending')
+      .gte('start_date', `${currentYear}-01-01`)
 
-    const leaveByStaff: Record<string, number> = {}
+    const takenByStaff: Record<string, number> = {}
     approvedLeave?.forEach((l: any) => {
-      leaveByStaff[l.user_id] = (leaveByStaff[l.user_id] || 0) + l.days_applied
+      takenByStaff[l.user_id] = (takenByStaff[l.user_id] || 0) + l.days_applied
+    })
+    const pendingByStaff: Record<string, number> = {}
+    pendingLeave?.forEach((l: any) => {
+      pendingByStaff[l.user_id] = (pendingByStaff[l.user_id] || 0) + l.days_applied
     })
 
     setStaffBalances(staff?.map(s => ({
       ...s,
-      taken: leaveByStaff[s.id] || 0,
-      balance: (s.leave_entitlement_days || 14) - (leaveByStaff[s.id] || 0),
+      taken: takenByStaff[s.id] || 0,
+      pending: pendingByStaff[s.id] || 0,
+      balance: (s.leave_entitlement_days || 14) - (takenByStaff[s.id] || 0),
     })) || [])
 
     setLoading(false)
@@ -145,6 +171,7 @@ export default function LeaveManagementPage() {
                 <div className="text-right flex-shrink-0">
                   <p className={cn('text-sm font-bold', s.balance < 3 ? 'text-red-600' : 'text-gray-900')}>{s.balance} days left</p>
                   <p className="text-xs text-gray-400">{s.taken} taken / {s.leave_entitlement_days} entitled</p>
+                  {s.pending > 0 && <p className="text-xs text-amber-500">{s.pending} days pending</p>}
                 </div>
               </div>
             ))}
