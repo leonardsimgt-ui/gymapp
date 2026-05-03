@@ -1,31 +1,35 @@
 -- ============================================================
--- GymApp Complete Database Schema
+-- GymApp Database Schema v2
 -- Run this entire file in Supabase SQL Editor
 -- ============================================================
 
 create extension if not exists "uuid-ossp";
 
 -- ============================================================
--- GYMS
+-- GYMS (now with logo_url)
 -- ============================================================
 create table gyms (
   id uuid primary key default uuid_generate_v4(),
   name text not null,
   address text,
   phone text,
+  logo_url text,
   is_active boolean default true,
   created_at timestamptz default now()
 );
 
 -- ============================================================
--- USERS (Admin, Manager, Trainer — linked to Supabase Auth)
+-- USERS
+-- role: admin | manager | business_ops | trainer
+-- manager_gym_id: for managers, restricts them to one gym
 -- ============================================================
 create table users (
   id uuid primary key references auth.users(id) on delete cascade,
   full_name text not null,
   email text not null unique,
   phone text,
-  role text not null check (role in ('admin', 'manager', 'trainer')),
+  role text not null check (role in ('admin', 'manager', 'business_ops', 'trainer')),
+  manager_gym_id uuid references gyms(id) on delete set null,
   is_active boolean default true,
   commission_signup_pct numeric(5,2) default 10.00,
   commission_session_pct numeric(5,2) default 15.00,
@@ -59,7 +63,7 @@ create table package_templates (
 );
 
 -- ============================================================
--- CLIENTS (created by Trainers)
+-- CLIENTS (email now optional)
 -- ============================================================
 create table clients (
   id uuid primary key default uuid_generate_v4(),
@@ -76,7 +80,7 @@ create table clients (
 );
 
 -- ============================================================
--- CLIENT PACKAGES (trainer assigns template to client)
+-- CLIENT PACKAGES
 -- ============================================================
 create table packages (
   id uuid primary key default uuid_generate_v4(),
@@ -100,7 +104,9 @@ create table packages (
 );
 
 -- ============================================================
--- SESSIONS (scheduled by Trainer, completed by Manager)
+-- SESSIONS
+-- session_notes mandatory for payout qualification
+-- is_notes_complete: true when trainer has submitted notes
 -- ============================================================
 create table sessions (
   id uuid primary key default uuid_generate_v4(),
@@ -113,6 +119,7 @@ create table sessions (
   location text,
   status text not null default 'scheduled' check (status in ('scheduled', 'completed', 'cancelled', 'no_show')),
   performance_notes text,
+  is_notes_complete boolean default false,
   session_commission_pct numeric(5,2),
   session_commission_sgd numeric(10,2),
   commission_paid boolean default false,
@@ -125,6 +132,7 @@ create table sessions (
 
 -- ============================================================
 -- MONTHLY COMMISSION PAYOUTS
+-- Only sessions with is_notes_complete = true qualify
 -- ============================================================
 create table commission_payouts (
   id uuid primary key default uuid_generate_v4(),
@@ -136,6 +144,7 @@ create table commission_payouts (
   session_commissions_sgd numeric(10,2) default 0,
   total_commission_sgd numeric(10,2) default 0,
   sessions_conducted int default 0,
+  qualified_sessions int default 0,
   new_clients int default 0,
   status text default 'pending' check (status in ('pending', 'approved', 'paid')),
   approved_by uuid references users(id),
@@ -160,6 +169,12 @@ create table whatsapp_logs (
 );
 
 -- ============================================================
+-- SUPABASE STORAGE BUCKET FOR GYM LOGOS
+-- ============================================================
+insert into storage.buckets (id, name, public) values ('gym-logos', 'gym-logos', true)
+on conflict (id) do nothing;
+
+-- ============================================================
 -- ROW LEVEL SECURITY
 -- ============================================================
 alter table gyms enable row level security;
@@ -172,78 +187,196 @@ alter table sessions enable row level security;
 alter table commission_payouts enable row level security;
 alter table whatsapp_logs enable row level security;
 
+-- Helper: get current user role
 create or replace function get_user_role()
 returns text as $$
   select role from users where id = auth.uid();
 $$ language sql security definer;
 
--- GYMS
-create policy "gyms_read" on gyms for select using (auth.uid() is not null);
-create policy "gyms_admin_write" on gyms for all using (get_user_role() = 'admin');
+-- Helper: get manager's assigned gym
+create or replace function get_manager_gym_id()
+returns uuid as $$
+  select manager_gym_id from users where id = auth.uid();
+$$ language sql security definer;
 
--- USERS
-create policy "users_read" on users for select using (
-  get_user_role() in ('admin', 'manager') or id = auth.uid()
+-- ============================================================
+-- GYMS POLICIES
+-- admin: full access
+-- manager: only their assigned gym
+-- business_ops + trainer: read assigned gyms
+-- ============================================================
+create policy "gyms_admin_all" on gyms for all using (get_user_role() = 'admin');
+
+create policy "gyms_manager_read" on gyms for select using (
+  get_user_role() = 'manager' and id = get_manager_gym_id()
 );
-create policy "users_admin_manager_insert" on users for insert with check (
+
+create policy "gyms_biz_ops_read" on gyms for select using (
+  get_user_role() = 'business_ops'
+);
+
+create policy "gyms_trainer_read" on gyms for select using (
+  get_user_role() = 'trainer' and
+  id in (select gym_id from trainer_gyms where trainer_id = auth.uid())
+);
+
+-- ============================================================
+-- USERS POLICIES
+-- ============================================================
+create policy "users_admin_all" on users for all using (get_user_role() = 'admin');
+
+create policy "users_manager_read" on users for select using (
+  get_user_role() = 'manager' and (
+    id = auth.uid() or
+    (role = 'trainer' and id in (
+      select tg.trainer_id from trainer_gyms tg where tg.gym_id = get_manager_gym_id()
+    ))
+  )
+);
+
+create policy "users_manager_insert" on users for insert with check (
   get_user_role() in ('admin', 'manager')
 );
-create policy "users_update_own" on users for update using (id = auth.uid());
-create policy "users_admin_update_all" on users for update using (get_user_role() = 'admin');
 
--- PACKAGE TEMPLATES
-create policy "templates_read" on package_templates for select using (auth.uid() is not null);
-create policy "templates_admin_write" on package_templates for all using (get_user_role() = 'admin');
-
--- CLIENTS
-create policy "clients_read" on clients for select using (
-  get_user_role() in ('admin', 'manager') or trainer_id = auth.uid()
+create policy "users_biz_ops_read" on users for select using (
+  get_user_role() = 'business_ops'
 );
+
+create policy "users_trainer_read_self" on users for select using (
+  id = auth.uid()
+);
+
+create policy "users_update_own" on users for update using (id = auth.uid());
+
+-- ============================================================
+-- PACKAGE TEMPLATES POLICIES
+-- ============================================================
+create policy "templates_admin_all" on package_templates for all using (get_user_role() = 'admin');
+create policy "templates_read_all" on package_templates for select using (auth.uid() is not null);
+
+-- ============================================================
+-- CLIENTS POLICIES
+-- ============================================================
+create policy "clients_admin_all" on clients for all using (get_user_role() = 'admin');
+
+create policy "clients_manager_read" on clients for select using (
+  get_user_role() = 'manager' and gym_id = get_manager_gym_id()
+);
+
+create policy "clients_biz_ops_read" on clients for select using (
+  get_user_role() = 'business_ops'
+);
+
+create policy "clients_trainer_read" on clients for select using (
+  get_user_role() = 'trainer' and trainer_id = auth.uid()
+);
+
 create policy "clients_trainer_insert" on clients for insert with check (
   get_user_role() = 'trainer' and trainer_id = auth.uid()
 );
-create policy "clients_update" on clients for update using (
-  get_user_role() in ('admin', 'manager') or trainer_id = auth.uid()
+
+create policy "clients_trainer_update" on clients for update using (
+  get_user_role() = 'trainer' and trainer_id = auth.uid()
 );
 
--- PACKAGES
-create policy "packages_read" on packages for select using (
-  get_user_role() in ('admin', 'manager') or trainer_id = auth.uid()
+-- ============================================================
+-- PACKAGES POLICIES
+-- ============================================================
+create policy "packages_admin_all" on packages for all using (get_user_role() = 'admin');
+
+create policy "packages_manager_read" on packages for select using (
+  get_user_role() = 'manager' and gym_id = get_manager_gym_id()
 );
+
+create policy "packages_biz_ops_read" on packages for select using (
+  get_user_role() = 'business_ops'
+);
+
+create policy "packages_trainer_read" on packages for select using (
+  get_user_role() = 'trainer' and trainer_id = auth.uid()
+);
+
 create policy "packages_trainer_insert" on packages for insert with check (
   get_user_role() = 'trainer' and trainer_id = auth.uid()
 );
-create policy "packages_admin_update" on packages for update using (
+
+create policy "packages_manager_update" on packages for update using (
   get_user_role() in ('admin', 'manager')
 );
 
--- SESSIONS
-create policy "sessions_read" on sessions for select using (
-  get_user_role() in ('admin', 'manager') or trainer_id = auth.uid()
+-- ============================================================
+-- SESSIONS POLICIES
+-- ============================================================
+create policy "sessions_admin_all" on sessions for all using (get_user_role() = 'admin');
+
+create policy "sessions_manager_read" on sessions for select using (
+  get_user_role() = 'manager' and gym_id = get_manager_gym_id()
 );
+
+create policy "sessions_manager_update" on sessions for update using (
+  get_user_role() = 'manager' and gym_id = get_manager_gym_id()
+);
+
+create policy "sessions_biz_ops_read" on sessions for select using (
+  get_user_role() = 'business_ops'
+);
+
+create policy "sessions_trainer_read" on sessions for select using (
+  get_user_role() = 'trainer' and trainer_id = auth.uid()
+);
+
 create policy "sessions_trainer_insert" on sessions for insert with check (
   get_user_role() = 'trainer' and trainer_id = auth.uid()
 );
-create policy "sessions_update" on sessions for update using (
-  get_user_role() in ('admin', 'manager') or trainer_id = auth.uid()
+
+create policy "sessions_trainer_update" on sessions for update using (
+  get_user_role() = 'trainer' and trainer_id = auth.uid()
 );
 
--- PAYOUTS
-create policy "payouts_manager_admin" on commission_payouts for all using (
-  get_user_role() in ('admin', 'manager')
+-- ============================================================
+-- PAYOUTS POLICIES
+-- ============================================================
+create policy "payouts_admin_all" on commission_payouts for all using (get_user_role() = 'admin');
+
+create policy "payouts_manager_all" on commission_payouts for all using (
+  get_user_role() = 'manager' and gym_id = get_manager_gym_id()
 );
+
+create policy "payouts_biz_ops_read" on commission_payouts for select using (
+  get_user_role() = 'business_ops'
+);
+
 create policy "payouts_trainer_read" on commission_payouts for select using (
   trainer_id = auth.uid()
 );
 
--- WHATSAPP LOGS
+-- ============================================================
+-- WHATSAPP LOG POLICIES
+-- ============================================================
 create policy "whatsapp_admin_manager" on whatsapp_logs for all using (
-  get_user_role() in ('admin', 'manager')
+  get_user_role() in ('admin', 'manager', 'business_ops')
 );
+
+-- ============================================================
+-- STORAGE POLICY FOR GYM LOGOS
+-- ============================================================
+create policy "logo_upload_admin" on storage.objects
+  for insert with check (
+    bucket_id = 'gym-logos' and get_user_role() = 'admin'
+  );
+
+create policy "logo_read_all" on storage.objects
+  for select using (bucket_id = 'gym-logos');
+
+create policy "logo_update_admin" on storage.objects
+  for update using (
+    bucket_id = 'gym-logos' and get_user_role() = 'admin'
+  );
 
 -- ============================================================
 -- SEED DATA
 -- ============================================================
 insert into gyms (name, address, phone) values
   ('FitZone Orchard', '391 Orchard Road, #B1-01, Singapore 238872', '+65 6123 4567'),
-  ('FitZone Tampines', '4 Tampines Central 5, #03-01, Singapore 529510', '+65 6234 5678');
+  ('FitZone Tampines', '4 Tampines Central 5, #03-01, Singapore 529510', '+65 6234 5678')
+on conflict do nothing;

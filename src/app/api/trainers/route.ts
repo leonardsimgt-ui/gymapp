@@ -29,11 +29,16 @@ export async function POST(request: Request) {
     })
     if (authError) return NextResponse.json({ error: authError.message }, { status: 400 })
 
+    const { employment_type, hourly_rate, membership_commission_pct, nric, nationality } = body
     const userPayload: any = {
       id: authData.user.id, full_name, email,
       phone: phone || null, role: role || 'trainer',
+      employment_type: employment_type || 'full_time',
+      hourly_rate: hourly_rate ? parseFloat(hourly_rate) : null,
       commission_signup_pct: parseFloat(commission_signup_pct) || 10,
       commission_session_pct: parseFloat(commission_session_pct) || 15,
+      membership_commission_pct: parseFloat(membership_commission_pct) || 5,
+      nric: nric || null, nationality: nationality || null,
     }
     if (role === 'manager' && manager_gym_id) userPayload.manager_gym_id = manager_gym_id
     if (role === 'manager') userPayload.is_also_trainer = !!is_also_trainer
