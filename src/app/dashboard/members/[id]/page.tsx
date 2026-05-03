@@ -107,6 +107,7 @@ export default function MemberProfilePage() {
 
   const activeMembership = memberships.find(m => m.status === 'active' && m.sale_status === 'confirmed')
   const canManage = currentUser?.role === 'manager' || currentUser?.role === 'business_ops'
+  const isStaff = currentUser?.role === 'staff'
   // Confirm logic:
   // - If sold by a manager (including manager-trainer hybrid, role = 'manager') → only biz_ops can confirm
   // - If sold by a trainer → manager or biz_ops can confirm
@@ -135,7 +136,7 @@ export default function MemberProfilePage() {
           <h1 className="text-xl font-bold text-gray-900">{member.full_name}</h1>
           <p className="text-xs text-gray-500">{member.gym?.name}{member.membership_number && ` · #${member.membership_number}`}</p>
         </div>
-        {canManage && <button onClick={() => setShowEditForm(!showEditForm)} className="btn-secondary flex items-center gap-1.5 text-xs py-1.5"><Edit2 className="w-3.5 h-3.5" /> Edit</button>}
+        {canManage && !isStaff && <button onClick={() => setShowEditForm(!showEditForm)} className="btn-secondary flex items-center gap-1.5 text-xs py-1.5"><Edit2 className="w-3.5 h-3.5" /> Edit</button>}
       </div>
 
       {/* Edit form */}
