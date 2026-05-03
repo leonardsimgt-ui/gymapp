@@ -41,7 +41,8 @@ export default function LeaveManagementPage() {
       // Also trainers assigned to this gym
       const { data: gymTrainers } = await supabase.from('trainer_gyms')
         .select('trainer_id').eq('gym_id', u.manager_gym_id)
-      const trainerIds = gymTrainers?.map((t: any) => t.trainer_id) || []
+      // Exclude self — manager's own leave goes to Business Ops, not themselves
+      const trainerIds = (gymTrainers?.map((t: any) => t.trainer_id) || []).filter((id: string) => id !== authUser.id)
       const managerIds = gymStaff?.map((s: any) => s.id) || []
       staffIds = Array.from(new Set([...managerIds, ...trainerIds]))
     } else if (u.role === 'business_ops') {
