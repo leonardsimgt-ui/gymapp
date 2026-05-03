@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect, useState } from 'react'
+import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase-browser'
 import { formatDate } from '@/lib/utils'
 import { Plus, Trash2, CheckCircle, AlertCircle, Calendar, X, Info } from 'lucide-react'
@@ -14,6 +15,7 @@ export default function PublicHolidaysPage() {
   const [saving, setSaving] = useState(false)
   const [success, setSuccess] = useState('')
   const [error, setError] = useState('')
+  const router = useRouter()
   const supabase = createClient()
 
   const showMsg = (msg: string) => { setSuccess(msg); setTimeout(() => setSuccess(''), 3000) }
@@ -22,6 +24,12 @@ export default function PublicHolidaysPage() {
   useEffect(() => { load() }, [selectedYear])
 
   const load = async () => {
+    // Route guard
+    const { data: { user: authUser } } = await supabase.auth.getUser()
+    if (!authUser) { router.replace('/dashboard'); return }
+    const { data: me } = await supabase.from('users').select('role').eq('id', authUser.id).single()
+    if (!me || (me.role !== 'business_ops')) { router.replace('/dashboard'); return }
+
     const { data } = await supabase.from('public_holidays')
       .select('*').eq('year', selectedYear).order('holiday_date')
     setHolidays(data || [])
