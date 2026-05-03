@@ -107,6 +107,7 @@ export default function MemberProfilePage() {
 
   const activeMembership = memberships.find(m => m.status === 'active' && m.sale_status === 'confirmed')
   const canManage = currentUser?.role === 'manager' || currentUser?.role === 'business_ops'
+  const canConfirmSale = currentUser?.role === 'business_ops'
   const canSellPT = (isActingAsTrainer || currentUser?.role === 'trainer') && !!activeMembership
 
   if (!member) return <div className="flex items-center justify-center h-48"><div className="animate-spin rounded-full h-6 w-6 border-b-2 border-red-600" /></div>
@@ -182,7 +183,7 @@ export default function MemberProfilePage() {
                     <p className="text-xs text-gray-400">Sold by: {m.sold_by?.full_name}</p>
                     {m.rejection_reason && <p className="text-xs text-red-500">Rejected: {m.rejection_reason}</p>}
                   </div>
-                  {canManage && m.sale_status === 'pending' && (
+                  {canConfirmSale && m.sale_status === 'pending' && (
                     <div className="flex gap-1">
                       <button onClick={() => handleConfirmSale(m.id)} className="btn-primary text-xs py-1 px-2 flex items-center gap-1"><CheckCircle className="w-3 h-3" /> Confirm</button>
                       <button onClick={() => handleRejectSale(m.id)} className="btn-secondary text-xs py-1 px-2"><XCircle className="w-3 h-3" /></button>
