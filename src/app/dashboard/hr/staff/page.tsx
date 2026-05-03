@@ -33,6 +33,7 @@ const emptyForm = {
   gym_ids: [] as string[], manager_gym_id: '', is_also_trainer: false,
   date_of_birth: '', date_of_joining: '', date_of_departure: '', departure_reason: '',
   nric: '', nationality: 'Singaporean',
+  leave_entitlement_days: '14',
 }
 
 export default function TrainersPage() {
@@ -106,6 +107,7 @@ export default function TrainersPage() {
       date_of_departure: member.date_of_departure || '',
       departure_reason: member.departure_reason || '',
       nric: member.nric || '',
+      leave_entitlement_days: member.leave_entitlement_days?.toString() || '14',
       nationality: member.nationality || 'Singaporean',
     })
     setShowCreateForm(false); setError('')
@@ -185,6 +187,14 @@ export default function TrainersPage() {
       <div className="grid grid-cols-2 gap-3">
         <div><label className="label">Date of Joining</label><input className="input" type="date" value={form.date_of_joining} onChange={e => setF((f: any) => ({ ...f, date_of_joining: e.target.value }))} /></div>
         <div><label className="label">Date of Departure</label><input className="input" type="date" value={form.date_of_departure} onChange={e => setF((f: any) => ({ ...f, date_of_departure: e.target.value }))} /></div>
+      </div>
+      <div>
+        <label className="label">Annual Leave Entitlement (days) *</label>
+        <input className="input" type="number" required min="0" max="365"
+          value={form.leave_entitlement_days}
+          onChange={e => setF((f: any) => ({ ...f, leave_entitlement_days: e.target.value }))}
+          placeholder="e.g. 14" />
+        <p className="text-xs text-gray-400 mt-1">Number of paid leave days per calendar year. Applies to full-time staff only.</p>
       </div>
       {form.date_of_departure && (
         <div><label className="label">Departure Reason</label><input className="input" value={form.departure_reason} onChange={e => setF((f: any) => ({ ...f, departure_reason: e.target.value }))} placeholder="e.g. Resigned, Contract ended" /></div>
