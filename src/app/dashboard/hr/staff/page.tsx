@@ -15,6 +15,7 @@ const ALL_ROLES = [
   { value: 'business_ops', label: 'Business Ops', description: 'Staff, gyms, payroll, reports' },
   { value: 'manager', label: 'Manager', description: 'Manage one gym club' },
   { value: 'trainer', label: 'Trainer', description: 'Manage own members and sessions' },
+  { value: 'staff', label: 'Operations Staff', description: 'Sales, member lookup, schedule view' },
 ]
 
 const roleBadge: Record<string, string> = {
@@ -22,6 +23,7 @@ const roleBadge: Record<string, string> = {
   trainer: 'bg-green-100 text-green-700',
   manager: 'bg-yellow-100 text-yellow-800',
   business_ops: 'bg-purple-100 text-purple-700',
+  staff: 'bg-blue-100 text-blue-700',
 }
 
 const emptyForm = {
@@ -140,7 +142,7 @@ export default function TrainersPage() {
 
   const getGymLabel = (m: any) => {
     if (m.role === 'trainer') return m.trainer_gyms?.map((tg: any) => tg.gyms?.name).filter(Boolean).join(', ') || 'Unassigned'
-    if (m.role === 'manager') return m.manager_gym?.name || 'Unassigned'
+    if (m.role === 'manager' || m.role === 'staff') return m.manager_gym?.name || 'Unassigned'
     if (m.role === 'admin') return 'Gym Library'
     return 'All Gyms'
   }
@@ -271,7 +273,7 @@ export default function TrainersPage() {
                   <div className="space-y-1.5">{gyms.map(g => <label key={g.id} className="flex items-center gap-2 cursor-pointer"><input type="checkbox" checked={createForm.gym_ids.includes(g.id)} onChange={() => toggleGym(g.id, 'create')} className="rounded border-gray-300 text-red-600" /><span className="text-sm text-gray-700">{g.name}</span></label>)}</div>
                 </div>
               )}
-              {createForm.role === 'manager' && (
+              {(createForm.role === 'manager' || createForm.role === 'staff') && (
                 <>
                   <div><label className="label">Assigned Gym *</label><select className="input" required value={createForm.manager_gym_id} onChange={e => setCreateForm(f => ({ ...f, manager_gym_id: e.target.value }))}><option value="">Select gym...</option>{gyms.map(g => <option key={g.id} value={g.id}>{g.name}</option>)}</select></div>
                   <AlsoTrainerToggle value={createForm.is_also_trainer} onChange={v => setCreateForm(f => ({ ...f, is_also_trainer: v }))} />
@@ -308,7 +310,7 @@ export default function TrainersPage() {
               {editForm.role === 'trainer' && !isSelf(editingUser) && (
                 <div><label className="label">Gym Assignments</label><div className="space-y-1.5">{gyms.map(g => <label key={g.id} className="flex items-center gap-2 cursor-pointer"><input type="checkbox" checked={(editForm as any).gym_ids.includes(g.id)} onChange={() => toggleGym(g.id, 'edit')} className="rounded border-gray-300 text-red-600" /><span className="text-sm text-gray-700">{g.name}</span></label>)}</div></div>
               )}
-              {editForm.role === 'manager' && !isSelf(editingUser) && (
+              {(editForm.role === 'manager' || editForm.role === 'staff') && !isSelf(editingUser) && (
                 <>
                   <div><label className="label">Assigned Gym</label><select className="input" value={(editForm as any).manager_gym_id} onChange={e => setEditForm((f: any) => ({ ...f, manager_gym_id: e.target.value }))}><option value="">— No gym assigned —</option>{gyms.map(g => <option key={g.id} value={g.id}>{g.name}</option>)}</select></div>
                   <AlsoTrainerToggle value={(editForm as any).is_also_trainer} onChange={v => setEditForm((f: any) => ({ ...f, is_also_trainer: v }))} />
@@ -326,7 +328,8 @@ export default function TrainersPage() {
 
           {/* Filters */}
           <div className="flex gap-1 flex-wrap">
-            {[{ key: 'all', label: `All (${staff.length})` }, { key: 'admin', label: `Admin (${staff.filter(s => s.role === 'admin').length})` }, { key: 'business_ops', label: `Biz Ops (${staff.filter(s => s.role === 'business_ops').length})` }, { key: 'manager', label: `Manager (${staff.filter(s => s.role === 'manager').length})` }, { key: 'trainer', label: `Trainer (${staff.filter(s => s.role === 'trainer').length})` }].map(({ key, label }) => (
+            {[{ key: 'all', label: `All (${staff.length})` }, { key: 'admin', label: `Admin (${staff.filter(s => s.role === 'admin').length})` }, { key: 'business_ops', label: `Biz Ops (${staff.filter(s => s.role === 'business_ops').length})` }, { key: 'manager', label: `Manager (${staff.filter(s => s.role === 'manager').length})` }, { key: 'trainer', label: `Trainer (${staff.filter(s => s.role === 'trainer').length})` },
+              { key: 'staff', label: `Ops Staff (${staff.filter(s => s.role === 'staff').length})` }].map(({ key, label }) => (
               <button key={key} onClick={() => setFilterRole(key)} className={cn('px-3 py-1.5 rounded-lg text-xs font-medium transition-colors', filterRole === key ? 'bg-red-600 text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200')}>{label}</button>
             ))}
             <div className="w-px bg-gray-200 mx-1" />
