@@ -44,6 +44,7 @@ const bizOpsNav: NavItem[] = [
   { href: '/dashboard/config/commission', label: 'Commission Rates', icon: DollarSign },
   { href: '/dashboard/config/public-holidays', label: 'Public Holidays', icon: CalendarDays },
   { href: '/dashboard/my/payslips', label: 'My Payslips', icon: Receipt },
+  { href: '/dashboard/my/leave', label: 'My Leave', icon: CalendarDays },
 ]
 
 const managerNav: NavItem[] = [
@@ -86,7 +87,7 @@ const partTimerNav: NavItem[] = [
   { href: '/dashboard/my/roster', label: 'My Roster', icon: CalendarDays },
   { href: '/dashboard/membership/sales', label: 'Log Membership Sale', icon: CreditCard },
   { href: '/dashboard/my/payslips', label: 'My Payslips', icon: Receipt },
-  { href: '/dashboard/my/leave', label: 'My Leave', icon: CalendarDays },
+  // My Leave intentionally excluded — part-timers do not apply for leave in this system
 ]
 
 const staffNav: NavItem[] = [
