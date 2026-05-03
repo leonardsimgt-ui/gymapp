@@ -4,47 +4,45 @@ import { useEffect, useState } from 'react'
 import { createClient } from '@/lib/supabase-browser'
 import { formatDate, formatSGD } from '@/lib/utils'
 import {
-  Plus, Calendar, Clock, Lock, CheckCircle, AlertCircle,
-  X, Save, Trash2, ChevronLeft, ChevronRight, User
+  Plus, Lock, CheckCircle, AlertCircle, X, Trash2,
+  ChevronLeft, ChevronRight, Settings, Clock, Users, AlertTriangle
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 
-interface RosterEntry {
-  id: string
-  user_id: string
-  gym_id: string
-  shift_date: string
-  shift_start: string
-  shift_end: string
-  hours_worked: number
-  hourly_rate: number
-  gross_pay: number
-  status: string
-  is_locked: boolean
-  whatsapp_reminder_sent: boolean
-  notes?: string
-  user?: { full_name: string; phone?: string; hourly_rate?: number }
-}
+const DEFAULT_PRESETS = [
+  { label: 'Morning', shift_start: '08:00', shift_end: '13:00' },
+  { label: 'Afternoon', shift_start: '13:00', shift_end: '18:00' },
+  { label: 'Evening', shift_start: '18:00', shift_end: '22:00' },
+  { label: 'Full Day', shift_start: '09:00', shift_end: '18:00' },
+]
 
 export default function RosterPage() {
   const [currentUser, setCurrentUser] = useState<any>(null)
-  const [partTimers, setPartTimers] = useState<any[]>([])
-  const [roster, setRoster] = useState<RosterEntry[]>([])
   const [gymId, setGymId] = useState<string | null>(null)
   const [gymName, setGymName] = useState('')
+  const [partTimers, setPartTimers] = useState<any[]>([])
+  const [roster, setRoster] = useState<any[]>([])
+  const [presets, setPresets] = useState<any[]>([])
   const [weekStart, setWeekStart] = useState(() => {
-    const d = new Date()
-    d.setDate(d.getDate() - d.getDay() + 1) // Monday
+    const d = new Date(); d.setDate(d.getDate() - (d.getDay() || 7) + 1)
     return d.toISOString().split('T')[0]
   })
-  const [showForm, setShowForm] = useState(false)
+
+  // Bulk entry state
+  const [showBulkForm, setShowBulkForm] = useState(false)
+  const [bulkForm, setBulkForm] = useState({
+    user_id: '', preset_id: '', custom_start: '', custom_end: '', hourly_rate: '',
+    dates: [] as string[],
+  })
+
+  // Preset management
+  const [showPresetForm, setShowPresetForm] = useState(false)
+  const [presetForm, setPresetForm] = useState({ label: '', shift_start: '', shift_end: '' })
+
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
   const [success, setSuccess] = useState('')
-  const [form, setForm] = useState({
-    user_id: '', shift_date: '', shift_start: '09:00', shift_end: '17:00',
-    hourly_rate: '', notes: '',
-  })
+  const [overlapWarning, setOverlapWarning] = useState<string | null>(null)
   const supabase = createClient()
 
   const showMsg = (msg: string) => { setSuccess(msg); setTimeout(() => setSuccess(''), 3000) }
@@ -54,217 +52,359 @@ export default function RosterPage() {
   const loadData = async () => {
     const { data: { user: authUser } } = await supabase.auth.getUser()
     if (!authUser) return
-    const { data: userData } = await supabase.from('users').select('*').eq('id', authUser.id).single()
-    setCurrentUser(userData)
+    const { data: u } = await supabase.from('users').select('*').eq('id', authUser.id).single()
+    setCurrentUser(u)
+    const gId = u.manager_gym_id || null
+    setGymId(gId)
 
-    const gId = userData?.manager_gym_id || userData?.role === 'business_ops' ? null : null
-    if (userData?.role === 'manager') setGymId(userData.manager_gym_id)
+    if (gId) {
+      const { data: gym } = await supabase.from('gyms').select('name').eq('id', gId).single()
+      setGymName(gym?.name || '')
 
-    const { data: gym } = await supabase.from('gyms').select('name')
-      .eq('id', userData?.manager_gym_id || '').single()
-    setGymName(gym?.name || '')
+      // Load presets for this gym
+      const { data: presetsData } = await supabase.from('roster_shift_presets')
+        .select('*').eq('gym_id', gId).eq('is_active', true).order('sort_order')
+      setPresets(presetsData?.length ? presetsData : DEFAULT_PRESETS)
 
-    // Load part-time staff for this gym
-    let ptQuery = supabase.from('users').select('*')
-      .eq('employment_type', 'part_time').eq('is_archived', false)
-    if (userData?.role === 'manager' && userData?.manager_gym_id) {
-      // Get part-timers assigned to this gym via trainer_gyms or manager_gym_id
-      const { data: gymTrainers } = await supabase
-        .from('trainer_gyms').select('trainer_id').eq('gym_id', userData.manager_gym_id)
-      const trainerIds = gymTrainers?.map(t => t.trainer_id) || []
-      if (trainerIds.length > 0) ptQuery = ptQuery.in('id', trainerIds)
+      // Load part-timers
+      const { data: gymTrainers } = await supabase.from('trainer_gyms').select('trainer_id').eq('gym_id', gId)
+      const tIds = gymTrainers?.map((t: any) => t.trainer_id) || []
+      let ptQ = supabase.from('users').select('*').eq('employment_type', 'part_time').eq('is_archived', false)
+      if (tIds.length > 0) ptQ = ptQ.in('id', tIds)
+      const { data: pt } = await ptQ.order('full_name')
+      setPartTimers(pt || [])
     }
-    const { data: pt } = await ptQuery.order('full_name')
-    setPartTimers(pt || [])
 
-    // Load roster for the week
-    const weekEnd = new Date(weekStart)
-    weekEnd.setDate(weekEnd.getDate() + 6)
-    const weekEndStr = weekEnd.toISOString().split('T')[0]
-
-    let rosterQuery = supabase.from('duty_roster')
+    // Load roster for week
+    const weekEnd = new Date(weekStart); weekEnd.setDate(weekEnd.getDate() + 6)
+    let rQ = supabase.from('duty_roster')
       .select('*, user:users(full_name, phone, hourly_rate)')
-      .gte('shift_date', weekStart).lte('shift_date', weekEndStr)
+      .gte('shift_date', weekStart).lte('shift_date', weekEnd.toISOString().split('T')[0])
       .order('shift_date').order('shift_start')
-    if (userData?.role === 'manager' && userData?.manager_gym_id) {
-      rosterQuery = rosterQuery.eq('gym_id', userData.manager_gym_id)
-    }
-    const { data: rosterData } = await rosterQuery
-    setRoster(rosterData || [])
+    if (gId) rQ = rQ.eq('gym_id', gId)
+    const { data: rData } = await rQ
+    setRoster(rData || [])
   }
 
   const weekDays = Array.from({ length: 7 }, (_, i) => {
-    const d = new Date(weekStart)
-    d.setDate(d.getDate() + i)
+    const d = new Date(weekStart); d.setDate(d.getDate() + i)
     return d.toISOString().split('T')[0]
   })
 
   const shiftWeek = (dir: number) => {
-    const d = new Date(weekStart)
-    d.setDate(d.getDate() + dir * 7)
+    const d = new Date(weekStart); d.setDate(d.getDate() + dir * 7)
     setWeekStart(d.toISOString().split('T')[0])
   }
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault()
-    if (!gymId) { setError('No gym assigned to your account'); return }
-    setSaving(true); setError('')
+  // Toggle a date in bulk selection
+  const toggleDate = (date: string) => {
+    setBulkForm(f => ({
+      ...f, dates: f.dates.includes(date) ? f.dates.filter(d => d !== date) : [...f.dates, date]
+    }))
+  }
 
-    const pt = partTimers.find(p => p.id === form.user_id)
-    const rate = parseFloat(form.hourly_rate) || pt?.hourly_rate || 0
-    if (!rate) { setError('Hourly rate is required'); setSaving(false); return }
+  // Get shift times from selected preset or custom
+  const getShiftTimes = () => {
+    if (bulkForm.preset_id === 'custom') {
+      return { start: bulkForm.custom_start, end: bulkForm.custom_end }
+    }
+    const preset = presets.find(p => p.id === bulkForm.preset_id || p.label === bulkForm.preset_id)
+    return preset ? { start: preset.shift_start, end: preset.shift_end } : null
+  }
 
-    const { error: err } = await supabase.from('duty_roster').insert({
-      user_id: form.user_id,
-      gym_id: gymId,
-      shift_date: form.shift_date,
-      shift_start: form.shift_start,
-      shift_end: form.shift_end,
-      hourly_rate: rate,
-      status: 'scheduled',
-      notes: form.notes || null,
-      created_by: currentUser?.id,
+  // Check for overlaps on selected dates for selected staff
+  const checkOverlaps = () => {
+    if (!bulkForm.user_id || bulkForm.dates.length === 0) return null
+    const times = getShiftTimes()
+    if (!times) return null
+    const overlapping = bulkForm.dates.filter(date => {
+      return roster.some(r =>
+        r.user_id === bulkForm.user_id && r.shift_date === date && !r.is_locked
+      )
     })
+    if (overlapping.length > 0) return `${bulkForm.user_id === 'all' ? 'Some staff' : 'This staff member'} already has shifts on: ${overlapping.map(d => formatDate(d)).join(', ')}`
 
-    if (err) { setError(err.message); setSaving(false); return }
-    await loadData()
-    setShowForm(false)
-    setForm({ user_id: '', shift_date: '', shift_start: '09:00', shift_end: '17:00', hourly_rate: '', notes: '' })
-    setSaving(false)
-    showMsg('Shift added')
+    // Check multiple staff on same slot
+    if (bulkForm.dates.length > 0 && times) {
+      const conflicts = bulkForm.dates.filter(date =>
+        roster.filter(r => r.shift_date === date && r.shift_start === times.start && r.shift_end === times.end).length > 0
+      )
+      if (conflicts.length > 0) return `Other staff are already rostered for ${times.start}–${times.end} on: ${conflicts.map(d => formatDate(d)).join(', ')}. You can still proceed if accepted.`
+    }
+    return null
   }
 
-  const handleLock = async (entry: RosterEntry) => {
-    if (!confirm(`Lock this shift for ${entry.user?.full_name}? It will not be editable after locking.`)) return
+  const handleBulkSubmit = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!gymId || bulkForm.dates.length === 0) { setError('Select at least one date'); return }
+    const times = getShiftTimes()
+    if (!times) { setError('Select a shift time'); return }
+    const staff = bulkForm.user_id === 'all'
+      ? partTimers : partTimers.filter(p => p.id === bulkForm.user_id)
+    if (staff.length === 0) { setError('Select staff member(s)'); return }
+
+    setSaving(true); setError(''); setOverlapWarning(null)
+
+    const rows = []
+    for (const date of bulkForm.dates) {
+      for (const pt of staff) {
+        const rate = parseFloat(bulkForm.hourly_rate) || pt.hourly_rate || 0
+        if (!rate) continue
+        const startParts = times.start.split(':').map(Number)
+        const endParts = times.end.split(':').map(Number)
+        const hours = (endParts[0] * 60 + endParts[1] - startParts[0] * 60 - startParts[1]) / 60
+        rows.push({
+          user_id: pt.id, gym_id: gymId,
+          shift_date: date, shift_start: times.start, shift_end: times.end,
+          hours_worked: Math.max(hours, 0), hourly_rate: rate,
+          gross_pay: Math.max(hours, 0) * rate,
+          status: 'scheduled', created_by: currentUser?.id,
+        })
+      }
+    }
+
+    if (rows.length > 0) {
+      const { error: err } = await supabase.from('duty_roster').insert(rows)
+      if (err) { setError(err.message); setSaving(false); return }
+    }
+
+    await loadData()
+    setBulkForm({ user_id: '', preset_id: '', custom_start: '', custom_end: '', hourly_rate: '', dates: [] })
+    setShowBulkForm(false); setSaving(false)
+    showMsg(`${rows.length} shift${rows.length !== 1 ? 's' : ''} added`)
+  }
+
+  const handleSavePreset = async (e: React.FormEvent) => {
+    e.preventDefault(); if (!gymId) return
+    await supabase.from('roster_shift_presets').insert({
+      gym_id: gymId, label: presetForm.label,
+      shift_start: presetForm.shift_start, shift_end: presetForm.shift_end,
+      sort_order: presets.length, created_by: currentUser?.id,
+    })
+    await loadData(); setShowPresetForm(false); setPresetForm({ label: '', shift_start: '', shift_end: '' })
+    showMsg('Shift preset saved')
+  }
+
+  const handleLock = async (entry: any) => {
+    if (!confirm(`Lock shift for ${entry.user?.full_name}?`)) return
     await supabase.from('duty_roster').update({
-      is_locked: true, locked_at: new Date().toISOString(), locked_by: currentUser?.id,
-      status: 'completed',
+      is_locked: true, locked_at: new Date().toISOString(), locked_by: currentUser?.id, status: 'completed'
     }).eq('id', entry.id)
-    await loadData()
-    showMsg('Shift locked and marked complete')
+    await loadData(); showMsg('Shift locked')
   }
 
-  const handleDelete = async (entry: RosterEntry) => {
+  const handleDelete = async (entry: any) => {
     if (entry.is_locked && currentUser?.role !== 'business_ops') {
-      setError('This shift is locked. Only Business Ops can delete it.'); return
+      setError('Shift is locked. Only Business Ops can delete it.'); return
     }
     if (!confirm('Delete this shift?')) return
     await supabase.from('duty_roster').delete().eq('id', entry.id)
-    await loadData()
-    showMsg('Shift deleted')
-  }
-
-  const handleSendWhatsApp = async (entry: RosterEntry) => {
-    if (!entry.user?.phone) { setError('This staff has no phone number'); return }
-    showMsg(`WhatsApp reminder queued for ${entry.user.full_name}`)
-    // Actual sending happens via cron job
-    await supabase.from('duty_roster').update({
-      whatsapp_reminder_sent: true, whatsapp_reminder_sent_at: new Date().toISOString()
-    }).eq('id', entry.id)
-    await loadData()
+    await loadData(); showMsg('Shift deleted')
   }
 
   const totalHours = roster.reduce((s, r) => s + (r.hours_worked || 0), 0)
   const totalPay = roster.reduce((s, r) => s + (r.gross_pay || 0), 0)
-
   const isBizOps = currentUser?.role === 'business_ops'
+  const overlap = showBulkForm ? checkOverlaps() : null
 
   return (
     <div className="space-y-5">
       <div className="flex items-center justify-between flex-wrap gap-3">
         <div>
           <h1 className="text-xl font-bold text-gray-900">Duty Roster</h1>
-          <p className="text-sm text-gray-500">{gymName} · Part-time staff shifts</p>
+          <p className="text-sm text-gray-500">{gymName} · Part-time staff</p>
         </div>
-        <button onClick={() => setShowForm(!showForm)} className="btn-primary flex items-center gap-1.5">
-          <Plus className="w-4 h-4" /> Add Shift
-        </button>
+        <div className="flex gap-2">
+          <button onClick={() => setShowPresetForm(!showPresetForm)} className="btn-secondary flex items-center gap-1.5 text-xs py-1.5">
+            <Settings className="w-3.5 h-3.5" /> Manage Shifts
+          </button>
+          <button onClick={() => setShowBulkForm(!showBulkForm)} className="btn-primary flex items-center gap-1.5">
+            <Plus className="w-4 h-4" /> Add Shifts
+          </button>
+        </div>
       </div>
 
       {success && <div className="flex items-center gap-2 bg-green-50 border border-green-200 rounded-lg p-3 text-sm text-green-700"><CheckCircle className="w-4 h-4 flex-shrink-0" />{success}</div>}
       {error && <div className="flex items-center gap-2 bg-red-50 border border-red-200 rounded-lg p-3 text-sm text-red-600"><AlertCircle className="w-4 h-4 flex-shrink-0" />{error}<button onClick={() => setError('')} className="ml-auto"><X className="w-4 h-4" /></button></div>}
 
+      {/* Preset manager */}
+      {showPresetForm && (
+        <div className="card p-4 space-y-4 border-gray-200">
+          <div className="flex items-center justify-between">
+            <h2 className="font-semibold text-gray-900 text-sm">Shift Time Presets</h2>
+            <button onClick={() => setShowPresetForm(false)}><X className="w-4 h-4 text-gray-400" /></button>
+          </div>
+          <div className="space-y-2">
+            {presets.map((p, i) => (
+              <div key={i} className="flex items-center gap-3 p-2 bg-gray-50 rounded-lg text-sm">
+                <span className="font-medium text-gray-900 w-24">{p.label}</span>
+                <span className="text-gray-500">{p.shift_start} – {p.shift_end}</span>
+                <span className="text-xs text-gray-400">
+                  {(() => { const [sh,sm] = p.shift_start.split(':').map(Number); const [eh,em] = p.shift_end.split(':').map(Number); return ((eh*60+em-sh*60-sm)/60).toFixed(1) })()}h
+                </span>
+              </div>
+            ))}
+          </div>
+          <form onSubmit={handleSavePreset} className="grid grid-cols-3 gap-2">
+            <input className="input" required placeholder="Label (e.g. Split)" value={presetForm.label} onChange={e => setPresetForm(f => ({ ...f, label: e.target.value }))} />
+            <input className="input" required type="time" value={presetForm.shift_start} onChange={e => setPresetForm(f => ({ ...f, shift_start: e.target.value }))} />
+            <input className="input" required type="time" value={presetForm.shift_end} onChange={e => setPresetForm(f => ({ ...f, shift_end: e.target.value }))} />
+            <button type="submit" className="col-span-3 btn-primary text-sm">Add Preset</button>
+          </form>
+        </div>
+      )}
+
       {/* Week navigator */}
       <div className="flex items-center gap-3">
         <button onClick={() => shiftWeek(-1)} className="btn-secondary p-2"><ChevronLeft className="w-4 h-4" /></button>
         <div className="flex-1 text-center">
-          <p className="text-sm font-medium text-gray-900">
-            Week of {formatDate(weekStart)} — {formatDate(weekDays[6])}
-          </p>
+          <p className="text-sm font-medium text-gray-900">{formatDate(weekStart)} — {formatDate(weekDays[6])}</p>
           <p className="text-xs text-gray-400">{roster.length} shifts · {totalHours.toFixed(1)}h · {formatSGD(totalPay)}</p>
         </div>
         <button onClick={() => shiftWeek(1)} className="btn-secondary p-2"><ChevronRight className="w-4 h-4" /></button>
       </div>
 
-      {/* Add shift form */}
-      {showForm && (
-        <form onSubmit={handleSubmit} className="card p-4 space-y-4 border-red-200">
+      {/* Bulk entry form */}
+      {showBulkForm && (
+        <form onSubmit={handleBulkSubmit} className="card p-4 space-y-4 border-red-200">
           <div className="flex items-center justify-between">
-            <h2 className="font-semibold text-gray-900 text-sm">Add New Shift</h2>
-            <button type="button" onClick={() => setShowForm(false)}><X className="w-4 h-4 text-gray-400" /></button>
+            <h2 className="font-semibold text-gray-900 text-sm">Add Shifts in Bulk</h2>
+            <button type="button" onClick={() => setShowBulkForm(false)}><X className="w-4 h-4 text-gray-400" /></button>
           </div>
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className="label">Staff Member *</label>
-              <select className="input" required value={form.user_id}
-                onChange={e => {
-                  const pt = partTimers.find(p => p.id === e.target.value)
-                  setForm(f => ({ ...f, user_id: e.target.value, hourly_rate: pt?.hourly_rate?.toString() || '' }))
-                }}>
-                <option value="">Select staff...</option>
-                {partTimers.map(p => <option key={p.id} value={p.id}>{p.full_name}</option>)}
-              </select>
-            </div>
-            <div>
-              <label className="label">Shift Date *</label>
-              <input className="input" type="date" required value={form.shift_date}
-                onChange={e => setForm(f => ({ ...f, shift_date: e.target.value }))} />
-            </div>
+
+          {/* Step 1: Staff */}
+          <div>
+            <label className="label">Step 1 — Select Staff Member</label>
+            <select className="input" required value={bulkForm.user_id}
+              onChange={e => { setBulkForm(f => ({ ...f, user_id: e.target.value, hourly_rate: partTimers.find(p => p.id === e.target.value)?.hourly_rate?.toString() || '' })) }}>
+              <option value="">Select staff...</option>
+              {partTimers.map(p => <option key={p.id} value={p.id}>{p.full_name} {p.hourly_rate ? `(${formatSGD(p.hourly_rate)}/hr)` : ''}</option>)}
+            </select>
           </div>
-          <div className="grid grid-cols-3 gap-3">
-            <div>
-              <label className="label">Start Time *</label>
-              <input className="input" type="time" required value={form.shift_start}
-                onChange={e => setForm(f => ({ ...f, shift_start: e.target.value }))} />
+
+          {/* Step 2: Shift time */}
+          <div>
+            <label className="label">Step 2 — Select Shift</label>
+            <div className="grid grid-cols-2 gap-2">
+              {presets.map((p, i) => (
+                <label key={i} className={cn('flex items-center gap-2 p-3 rounded-lg border cursor-pointer transition-colors',
+                  (bulkForm.preset_id === p.id || bulkForm.preset_id === p.label) ? 'border-red-500 bg-red-50' : 'border-gray-200 hover:border-gray-300')}>
+                  <input type="radio" name="preset" checked={bulkForm.preset_id === (p.id || p.label)}
+                    onChange={() => setBulkForm(f => ({ ...f, preset_id: p.id || p.label, custom_start: '', custom_end: '' }))} />
+                  <div>
+                    <p className="text-sm font-medium text-gray-900">{p.label}</p>
+                    <p className="text-xs text-gray-400">{p.shift_start} – {p.shift_end}</p>
+                  </div>
+                </label>
+              ))}
+              <label className={cn('flex items-center gap-2 p-3 rounded-lg border cursor-pointer transition-colors',
+                bulkForm.preset_id === 'custom' ? 'border-red-500 bg-red-50' : 'border-gray-200 hover:border-gray-300')}>
+                <input type="radio" name="preset" checked={bulkForm.preset_id === 'custom'}
+                  onChange={() => setBulkForm(f => ({ ...f, preset_id: 'custom' }))} />
+                <p className="text-sm font-medium text-gray-900">Custom time</p>
+              </label>
             </div>
-            <div>
-              <label className="label">End Time *</label>
-              <input className="input" type="time" required value={form.shift_end}
-                onChange={e => setForm(f => ({ ...f, shift_end: e.target.value }))} />
-            </div>
+            {bulkForm.preset_id === 'custom' && (
+              <div className="grid grid-cols-2 gap-2 mt-2">
+                <div><label className="label text-xs">Start</label><input className="input" type="time" required={bulkForm.preset_id === 'custom'} value={bulkForm.custom_start} onChange={e => setBulkForm(f => ({ ...f, custom_start: e.target.value }))} /></div>
+                <div><label className="label text-xs">End</label><input className="input" type="time" required={bulkForm.preset_id === 'custom'} value={bulkForm.custom_end} onChange={e => setBulkForm(f => ({ ...f, custom_end: e.target.value }))} /></div>
+              </div>
+            )}
+          </div>
+
+          {/* Hourly rate */}
+          {bulkForm.user_id && (
             <div>
               <label className="label">Hourly Rate (SGD) *</label>
-              <input className="input" type="number" min="0" step="0.50" required value={form.hourly_rate}
-                onChange={e => setForm(f => ({ ...f, hourly_rate: e.target.value }))} />
+              <input className="input" type="number" min="0" step="0.50" required value={bulkForm.hourly_rate}
+                onChange={e => setBulkForm(f => ({ ...f, hourly_rate: e.target.value }))} />
             </div>
-          </div>
+          )}
+
+          {/* Step 3: Pick dates from current week */}
           <div>
-            <label className="label">Notes</label>
-            <input className="input" value={form.notes} onChange={e => setForm(f => ({ ...f, notes: e.target.value }))}
-              placeholder="e.g. Cover for sick leave" />
+            <label className="label">Step 3 — Select Dates (current week shown)</label>
+            <div className="grid grid-cols-7 gap-1">
+              {weekDays.map(date => {
+                const dayLabel = new Date(date).toLocaleDateString('en-SG', { weekday: 'short' })
+                const dayNum = new Date(date).getDate()
+                const isSelected = bulkForm.dates.includes(date)
+                const isPast = date < new Date().toISOString().split('T')[0]
+                return (
+                  <button key={date} type="button" onClick={() => !isPast && toggleDate(date)}
+                    className={cn('flex flex-col items-center py-2.5 rounded-lg border transition-colors text-xs',
+                      isPast ? 'opacity-40 cursor-not-allowed border-gray-100' :
+                      isSelected ? 'border-red-500 bg-red-600 text-white' : 'border-gray-200 hover:border-red-300')}>
+                    <span className={cn('font-medium', isSelected ? 'text-white' : 'text-gray-400')}>{dayLabel}</span>
+                    <span className={cn('text-sm font-bold', isSelected ? 'text-white' : 'text-gray-900')}>{dayNum}</span>
+                  </button>
+                )
+              })}
+            </div>
+            {bulkForm.dates.length > 0 && (
+              <p className="text-xs text-gray-500 mt-1">{bulkForm.dates.length} date{bulkForm.dates.length !== 1 ? 's' : ''} selected</p>
+            )}
           </div>
+
+          {/* Overlap warning */}
+          {overlap && (
+            <div className="flex items-start gap-2 bg-amber-50 border border-amber-200 rounded-lg p-3">
+              <AlertTriangle className="w-4 h-4 text-amber-600 flex-shrink-0 mt-0.5" />
+              <div>
+                <p className="text-xs font-medium text-amber-800">{overlap}</p>
+                <p className="text-xs text-amber-600 mt-0.5">You can still proceed — multiple staff per shift is allowed with manager acceptance.</p>
+              </div>
+            </div>
+          )}
+
+          {/* Preview */}
+          {bulkForm.dates.length > 0 && bulkForm.user_id && bulkForm.preset_id && bulkForm.hourly_rate && (() => {
+            const times = getShiftTimes()
+            if (!times) return null
+            const [sh,sm] = times.start.split(':').map(Number)
+            const [eh,em] = times.end.split(':').map(Number)
+            const hrs = Math.max((eh*60+em-sh*60-sm)/60, 0)
+            const rate = parseFloat(bulkForm.hourly_rate)
+            const total = hrs * rate * bulkForm.dates.length
+            return (
+              <div className="bg-gray-50 rounded-lg p-3 text-xs text-gray-600">
+                <p className="font-medium text-gray-900 mb-1">Summary</p>
+                <p>{bulkForm.dates.length} shift{bulkForm.dates.length !== 1 ? 's' : ''} × {hrs.toFixed(1)}h × {formatSGD(rate)}/hr = <strong>{formatSGD(total)}</strong></p>
+              </div>
+            )
+          })()}
+
           <div className="flex gap-2">
-            <button type="submit" disabled={saving} className="btn-primary flex-1 disabled:opacity-50">
-              {saving ? 'Saving...' : 'Add Shift'}
+            <button type="submit" disabled={saving || bulkForm.dates.length === 0}
+              className="btn-primary flex-1 disabled:opacity-50">
+              {saving ? 'Saving...' : `Add ${bulkForm.dates.length * (bulkForm.user_id === 'all' ? partTimers.length : 1) || 0} Shift${bulkForm.dates.length !== 1 ? 's' : ''}`}
             </button>
-            <button type="button" onClick={() => setShowForm(false)} className="btn-secondary">Cancel</button>
+            <button type="button" onClick={() => setShowBulkForm(false)} className="btn-secondary">Cancel</button>
           </div>
         </form>
       )}
 
-      {/* Roster by day */}
-      {weekDays.map(day => {
-        const dayShifts = roster.filter(r => r.shift_date === day)
-        const dayName = new Date(day).toLocaleDateString('en-SG', { weekday: 'short', day: 'numeric', month: 'short' })
+      {/* Weekly roster */}
+      {weekDays.map(date => {
+        const dayShifts = roster.filter(r => r.shift_date === date)
+        const dayLabel = new Date(date).toLocaleDateString('en-SG', { weekday: 'short', day: 'numeric', month: 'short' })
+        const hasMultiple = dayShifts.length > 1
         return (
-          <div key={day} className="card">
-            <div className="flex items-center justify-between p-3 border-b border-gray-100 bg-gray-50 rounded-t-xl">
-              <p className="text-sm font-medium text-gray-700">{dayName}</p>
-              {dayShifts.length > 0 && (
-                <p className="text-xs text-gray-400">
-                  {dayShifts.reduce((s, r) => s + r.hours_worked, 0).toFixed(1)}h · {formatSGD(dayShifts.reduce((s, r) => s + r.gross_pay, 0))}
-                </p>
-              )}
+          <div key={date} className="card">
+            <div className={cn('flex items-center justify-between p-3 border-b border-gray-100 rounded-t-xl', hasMultiple ? 'bg-blue-50' : 'bg-gray-50')}>
+              <p className="text-sm font-medium text-gray-700">{dayLabel}</p>
+              <div className="flex items-center gap-2">
+                {hasMultiple && (
+                  <span className="flex items-center gap-1 text-xs text-blue-600 font-medium">
+                    <Users className="w-3.5 h-3.5" /> {dayShifts.length} staff rostered
+                  </span>
+                )}
+                {dayShifts.length > 0 && (
+                  <p className="text-xs text-gray-400">
+                    {dayShifts.reduce((s, r) => s + r.hours_worked, 0).toFixed(1)}h · {formatSGD(dayShifts.reduce((s, r) => s + r.gross_pay, 0))}
+                  </p>
+                )}
+              </div>
             </div>
             {dayShifts.length === 0 ? (
               <p className="p-3 text-xs text-gray-300 text-center">No shifts</p>
@@ -284,26 +424,15 @@ export default function RosterPage() {
                       <p className="text-xs text-gray-500">
                         {entry.shift_start} – {entry.shift_end} · {entry.hours_worked?.toFixed(1)}h · {formatSGD(entry.gross_pay)}
                       </p>
-                      {entry.notes && <p className="text-xs text-gray-400">{entry.notes}</p>}
                     </div>
-                    <div className="flex items-center gap-1 flex-shrink-0">
+                    <div className="flex items-center gap-1">
                       {!entry.is_locked && (
-                        <>
-                          <button onClick={() => handleLock(entry)} title="Lock shift"
-                            className="p-1.5 text-gray-400 hover:text-green-600 hover:bg-green-50 rounded-lg">
-                            <Lock className="w-3.5 h-3.5" />
-                          </button>
-                          {!entry.whatsapp_reminder_sent && entry.user?.phone && (
-                            <button onClick={() => handleSendWhatsApp(entry)} title="Send WhatsApp reminder"
-                              className="p-1.5 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg text-xs font-medium">
-                              WA
-                            </button>
-                          )}
-                        </>
+                        <button onClick={() => handleLock(entry)} title="Lock" className="p-1.5 text-gray-400 hover:text-green-600 hover:bg-green-50 rounded-lg">
+                          <Lock className="w-3.5 h-3.5" />
+                        </button>
                       )}
                       {(isBizOps || !entry.is_locked) && (
-                        <button onClick={() => handleDelete(entry)} title="Delete"
-                          className="p-1.5 text-gray-400 hover:text-red-500 hover:bg-red-50 rounded-lg">
+                        <button onClick={() => handleDelete(entry)} title="Delete" className="p-1.5 text-gray-400 hover:text-red-500 hover:bg-red-50 rounded-lg">
                           <Trash2 className="w-3.5 h-3.5" />
                         </button>
                       )}
