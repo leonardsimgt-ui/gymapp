@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase-browser'
-import { formatSGD, formatDate } from '@/lib/utils'
+import { formatSGD, formatDate, cn } from '@/lib/utils'
 import { ArrowLeft, User, CreditCard, CheckCircle, AlertCircle } from 'lucide-react'
 import Link from 'next/link'
 
